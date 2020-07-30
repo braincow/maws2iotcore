@@ -1,4 +1,6 @@
 #[macro_use] extern crate log;
+extern crate frank_jwt;
+#[macro_use] extern crate serde_json;
 
 use clap::{App, Arg};
 use dotenv::dotenv;
@@ -10,6 +12,9 @@ use std::{env, io, str};
 use tokio_util::codec::{Decoder, Encoder};
 use futures::stream::StreamExt;
 use bytes::BytesMut;
+use frank_jwt::{Algorithm, encode};
+use std::time::{SystemTime, UNIX_EPOCH};
+use paho_mqtt as mqtt;
 
 #[derive(Debug, Deserialize)]
 struct SerialConfig {
@@ -17,8 +22,19 @@ struct SerialConfig {
 }
 
 #[derive(Debug, Deserialize)]
+struct IotCoreConfig {
+    device_id: String,
+    private_key: String,
+    project_id: String,
+    registry_name: String,
+    registry_region: String,
+    ca_certs: String
+}
+
+#[derive(Debug, Deserialize)]
 struct AppConfig {
-    serial: SerialConfig
+    serial: SerialConfig,
+    iotcore: IotCoreConfig
 }
 
 struct LineCodec;
@@ -221,6 +237,65 @@ async fn main() {
         }
     };
 
+    // create JWT key that we shall use to authenticate towards iot core
+    let now = SystemTime::now();
+    let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
+    let payload = json!({
+        "iat": secs_since_epoc.as_secs(),
+        "exp": secs_since_epoc.as_secs() + 3600,
+        "aud": config.iotcore.project_id
+    });
+    let header = json!({});
+    let jwt = match encode(header, &Path::new(&config.iotcore.private_key).to_path_buf(), &payload, Algorithm::RS256) {
+        Ok(jwt_key) => jwt_key,
+        Err(error) => {
+            error!("Unable to create a JWT key: {}", error);
+            std::process::exit(exitcode::PROTOCOL)
+        }
+    };
+
+    // construct the string that is used as mqtt password
+    let client_id = format!("projects/{}/locations/{}/registries/{}/devices/{}",
+        config.iotcore.project_id,
+        config.iotcore.registry_region,
+        config.iotcore.registry_name,
+        config.iotcore.device_id);
+
+    // connect to iotcore mqtt server cluster
+    let create_opts = mqtt::CreateOptionsBuilder::new()
+        .client_id(client_id)
+        .server_uri("ssl://mqtt.googleapis.com:8883")
+        .persistence(mqtt::PersistenceType::None)
+        .finalize();
+
+    let cli = match mqtt::AsyncClient::new(create_opts) {
+        Ok(cli) => cli,
+        Err(error) => {
+            error!("Error on creating mqtt client: {}", error);
+            std::process::exit(exitcode::TEMPFAIL);
+        }
+    };
+    let ssl_options = match mqtt::SslOptionsBuilder::new()
+        .trust_store(Path::new(&config.iotcore.ca_certs).to_path_buf()) {
+            Ok(ssl_options) => ssl_options.finalize(),
+            Err(error) => {
+                error!("Error on building SSL settings for MQTT client: {}", error);
+                std::process::exit(exitcode::TEMPFAIL);    
+            }
+    };    
+    let conn_opts = mqtt::ConnectOptionsBuilder::new()
+        .user_name("not_used")
+        .password(jwt)
+        .ssl_options(ssl_options)
+        .finalize();
+    match cli.connect(conn_opts).await {
+        Ok(_) => {},
+        Err(error) => {
+            error!("Error on connecting to IoT Core via MQTT: {}", error);
+            std::process::exit(exitcode::IOERR);
+        }
+    };
+
     let settings = tokio_serial::SerialPortSettings::default();
     let mut port = match tokio_serial::Serial::from_path(config.serial.port, &settings) {
         Ok(port) => port,
@@ -235,7 +310,7 @@ async fn main() {
         Ok(_) =>
             debug!("Unix port exclusivity set to false."),
         Err(error) => {
-            error!("Unable to set serial port exclusive to false: {}", error);
+            error!("Unable to set UNIX serial port exclusive to false: {}", error);
             std::process::exit(exitcode::IOERR);
         }
     }

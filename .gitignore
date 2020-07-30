@@ -1,1 +1,4 @@
 /target
+rsa_private.pem
+rsa_cert.pem
+roots.pem

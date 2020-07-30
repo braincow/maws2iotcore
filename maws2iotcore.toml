@@ -2,4 +2,13 @@
 # the serial port to attach to
 port = "/dev/ttyr00"
 
+[iotcore]
+# configuration required for accessing the iotcore service
+device_id = "fubar-device"
+private_key = "./rsa_private.pem"
+project_id = "aina-saa"
+registry_name = "aina-saa-iot"
+registry_region = "europe-west1"
+ca_certs = "roots.pem"
+
 # eof
