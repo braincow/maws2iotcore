@@ -53,6 +53,12 @@ impl Encoder for LineCodec {
     }
 }
 
+/*
+ DEBUG maws2iotcore > LOG         19.0     9.8   55       984.4  1001.7   125      0.0    331      0.5
+ DEBUG maws2iotcore > PTU         19.0    10.3    20.2     9.8     8.8    13.0   55      50      99      984.4   983.8   986.7  1001.7  1001.1  1004.4       125       0     871      0.0     0.0     0.2
+ DEBUG maws2iotcore > WIND         0.3    300
+*/
+
 #[derive(Debug)]
 struct MAWSWindMessage {
     ws_cur: f64, // WScur m/s 
@@ -72,8 +78,6 @@ struct MAWSLogMessage {
     ws2min_avg: f64 // WS2minAvg m/s
 }
 
-/* TA60sAvg,TA24hMin,TA24hMax,DP60sAvg,DP24hMin,DP24hMax,RH60sAvg,RH24hMin,RH24hMax,PA60sAvg,PA24hMin,PA24hMax,QFF60sAvg,QFF24hMin,QFF24hMax,SR60sAvg,SR24hMin,SR24hMax,PR1hSum,PR6hSum,PR24hSum,,,,,,
-,,°C,°C,°C,°C,°C,°C,%,%,%,hPa,hPa,hPa,hPa,hPa,hPa,W/m2,W/m2,W/m2,mm,mm,mm,,,,,, */
 #[derive(Debug)]
 struct MAWSPtuMessage {
     ta60s_avg: f64, // TA60sAvg °C
@@ -249,11 +253,5 @@ async fn main() {
         debug!("{:?}", message);
     }
 }
-
-/*
- DEBUG maws2iotcore > LOG         19.0     9.8   55       984.4  1001.7   125      0.0    331      0.5
- DEBUG maws2iotcore > PTU         19.0    10.3    20.2     9.8     8.8    13.0   55      50      99      984.4   983.8   986.7  1001.7  1001.1  1004.4       125       0     871      0.0     0.0     0.2
- DEBUG maws2iotcore > WIND         0.3    300
-*/
 
 // eof
