@@ -12,8 +12,13 @@ use futures::stream::StreamExt;
 use bytes::BytesMut;
 
 #[derive(Debug, Deserialize)]
-struct AppConfig {
+struct SerialConfig {
     port: String
+}
+
+#[derive(Debug, Deserialize)]
+struct AppConfig {
+    serial: SerialConfig
 }
 
 struct LineCodec;
@@ -213,7 +218,7 @@ async fn main() {
     };
 
     let settings = tokio_serial::SerialPortSettings::default();
-    let mut port = match tokio_serial::Serial::from_path(config.port, &settings) {
+    let mut port = match tokio_serial::Serial::from_path(config.serial.port, &settings) {
         Ok(port) => port,
         Err(error) => {
             error!("Unable to open serial port: {}", error);
