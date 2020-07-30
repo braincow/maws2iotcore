@@ -277,6 +277,7 @@ async fn main() {
         }
     };
     let ssl_options = match mqtt::SslOptionsBuilder::new()
+        .ssl_version(mqtt::SslVersion::Tls_1_2)
         .trust_store(Path::new(&config.iotcore.ca_certs).to_path_buf()) {
             Ok(ssl_options) => ssl_options.finalize(),
             Err(error) => {

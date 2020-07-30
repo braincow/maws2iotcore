@@ -7,7 +7,7 @@ port = "/dev/ttyr00"
 device_id = "fubar-device"
 private_key = "./rsa_private.pem"
 project_id = "aina-saa"
-registry_name = "aina-saa-iot"
+registry_name = "aina-saa-maws"
 registry_region = "europe-west1"
 ca_certs = "roots.pem"
 
