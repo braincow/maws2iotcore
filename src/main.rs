@@ -6,7 +6,7 @@ use clap::{App, Arg};
 use dotenv::dotenv;
 use directories::ProjectDirs;
 use std::path::Path;
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use std::fs;
 use std::{env, io, str};
 use tokio_util::codec::{Decoder, Encoder};
@@ -75,13 +75,13 @@ impl Encoder for LineCodec {
  DEBUG maws2iotcore > WIND         0.3    300
 */
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct MAWSWindMessage {
     ws_cur: f64, // WScur m/s 
     wd_cur: f64 // WDcur °C
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct MAWSLogMessage {
     ta60s_avg: f64, // TA60sAvg °C
     dp60s_avg: f64, // DP60sAvg °C
@@ -94,7 +94,7 @@ struct MAWSLogMessage {
     ws2min_avg: f64 // WS2minAvg m/s
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct MAWSPtuMessage {
     ta60s_avg: f64, // TA60sAvg °C
     ta24h_min: f64, // TA24hMin °C
@@ -119,7 +119,7 @@ struct MAWSPtuMessage {
     pr24h_max: f64 // PR24hMax mm
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 enum MAWSMessageKind {
     WIND(MAWSWindMessage),
     LOG(MAWSLogMessage),
@@ -179,6 +179,10 @@ impl MAWSMessageKind {
         }
 
         message
+    }
+
+    fn as_json(&self) -> String {
+        serde_json::to_string(self).unwrap()
     }
 }
 
@@ -307,6 +311,8 @@ async fn main() {
         }
     };
 
+    let topic = format!("/devices/{}/events", config.iotcore.device_id);
+
     #[cfg(unix)]
     match port.set_exclusive(false) {
         Ok(_) =>
@@ -328,6 +334,15 @@ async fn main() {
             }
         };
         debug!("{:?}", message);
+
+        let mqtt_msg = mqtt::Message::new(topic.clone(), message.as_json(), mqtt::QOS_1);
+        match cli.publish(mqtt_msg).await {
+            Ok(_) => {},
+            Err(error) => {
+                error!("Failed to publish message over MQTT: {}", error);
+                std::process::exit(exitcode::PROTOCOL);
+            }
+        }
     }
 }
 
