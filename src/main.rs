@@ -264,6 +264,7 @@ async fn main() {
     // connect to iotcore mqtt server cluster
     let create_opts = mqtt::CreateOptionsBuilder::new()
         .client_id(client_id)
+        .mqtt_version(mqtt::types::MQTT_VERSION_3_1_1)
         .server_uri("ssl://mqtt.googleapis.com:8883")
         .persistence(mqtt::PersistenceType::None)
         .finalize();
