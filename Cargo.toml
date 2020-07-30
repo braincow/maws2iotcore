@@ -1,0 +1,24 @@
+[package]
+name = "maws2iotcore"
+version = "0.1.0"
+authors = ["Antti Peltonen <antti.peltonen@iki.fi>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "2.33"
+dotenv = "0.15"
+log = "0.4"
+pretty_env_logger = "0.4"
+directories = "3.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.5"
+exitcode = "1.1"
+bytes = "0.5"
+futures = "0.3"
+tokio-serial = "4.3"
+tokio = { version = "0.2", features = ["macros"], default-features = false }
+tokio-util = { version = "0.2", features = ["codec"], default-features = false }
+
+# eof
