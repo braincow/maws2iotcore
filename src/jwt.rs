@@ -53,6 +53,17 @@ impl IotCoreAuthToken {
         self.payload = JWTPayload::new(&self.audience);
         self.issue_new()
     }
+
+    pub fn is_valid(&self) -> bool {
+        let now = SystemTime::now();
+        let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
+
+        if secs_since_epoc.as_secs() > self.payload.exp {
+            return false
+        }
+        
+        return true
+    }
 }
 
 // eof
