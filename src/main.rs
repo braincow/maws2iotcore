@@ -85,6 +85,7 @@ async fn main() {
         }
     };
 
+    // open the configured serial port
     let settings = tokio_serial::SerialPortSettings::default();
     let mut port = match tokio_serial::Serial::from_path(config.serial.port, &settings) {
         Ok(port) => port,
@@ -110,7 +111,7 @@ async fn main() {
         let message = match message_result {
             Ok(message) => message,
             Err(error) => {
-                error!("Failed to read a line over the serial line: {}", error);
+                error!("Failed to read data over the serial line: {}", error);
                 std::process::exit(exitcode::IOERR);
             }
         };
