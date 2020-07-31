@@ -106,6 +106,7 @@ impl MAWSMessageKind {
                 pr24h_max: string_splitted[21].parse().unwrap()    
             })
         } else {
+            warn!("Unrecognized MAWS message!");
             message = MAWSMessageKind::UNKNOWN;
         }
 
