@@ -53,7 +53,8 @@ async fn main() {
         _ => env::set_var("RUST_LOG", "debug")
     }
     // initialize logger
-    pretty_env_logger::init();
+    pretty_env_logger::try_init_timed().unwrap();
+
     info!("Starting {} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
     // read configuration
