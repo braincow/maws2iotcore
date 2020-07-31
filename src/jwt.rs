@@ -1,22 +1,51 @@
 use frank_jwt::{Algorithm, encode};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use serde::Serialize;
 use crate::config::AppConfig;
 
-pub fn issue_new_jwt_token(config: &AppConfig) -> Result<String, frank_jwt::Error> {
-    // create JWT key that we shall use to authenticate towards iot core
-    let now = SystemTime::now();
-    let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
+#[derive(Debug, Serialize)]
+pub struct JWTHeaders;
 
-    let payload = json!({
-        "iat": secs_since_epoc.as_secs(),
-        "exp": secs_since_epoc.as_secs() + 3600,
-        "aud": config.iotcore.project_id
-    });
-
-    let header = json!({});
-
-    let jwt = encode(header, &Path::new(&config.iotcore.private_key).to_path_buf(), &payload, Algorithm::RS256)?;
-
-    Ok(jwt)
+#[derive(Debug, Serialize)]
+pub struct JWTPayload {
+    iat: u64,
+    exp: u64,
+    aud: String
 }
+
+impl JWTPayload {
+    fn new(audience: &String) -> JWTPayload {
+        let now = SystemTime::now();
+        let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
+    
+        JWTPayload {
+            iat: secs_since_epoc.as_secs(),
+            exp: secs_since_epoc.as_secs() + 3600,
+            aud: audience.clone()
+        }
+    }
+}
+
+pub struct IotCoreAuthToken {
+    headers: JWTHeaders,
+    payload: JWTPayload,
+    private_key: PathBuf
+}
+
+impl IotCoreAuthToken {
+    pub fn build(config: &AppConfig) -> IotCoreAuthToken {
+        IotCoreAuthToken {
+            headers: JWTHeaders,
+            payload: JWTPayload::new(&config.iotcore.project_id),
+            private_key: Path::new(&config.iotcore.private_key).to_path_buf()
+        }
+    }
+
+    pub fn issue_new(&self) -> Result<String, frank_jwt::Error> {
+        let jwt = encode(json!(self.headers), &self.private_key, &json!(self.payload), Algorithm::RS256)?;
+        Ok(jwt)
+    }
+}
+
+// eof

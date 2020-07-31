@@ -16,7 +16,7 @@ use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
 use paho_mqtt as mqtt;
 use crate::config::read_config;
-use crate::jwt::issue_new_jwt_token;
+use crate::jwt::IotCoreAuthToken;
 use crate::linecodec::LineCodec;
 use crate::iotcore::connect_to_iotcore;
 
@@ -68,7 +68,8 @@ async fn main() {
     };
 
     // issue the initial JWT token
-    let jwt_token = match issue_new_jwt_token(&config) {
+    let jwt_token_factory = IotCoreAuthToken::build(&config);
+    let jwt_token = match jwt_token_factory.issue_new() {
         Ok(jwt_token) => jwt_token,
         Err(error) => {
             error!("Unable to issue a new JWT token: {}", error);
