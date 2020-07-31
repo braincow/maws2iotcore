@@ -30,7 +30,8 @@ impl JWTPayload {
 pub struct IotCoreAuthToken {
     headers: JWTHeaders,
     payload: JWTPayload,
-    private_key: PathBuf
+    private_key: PathBuf,
+    audience: String
 }
 
 impl IotCoreAuthToken {
@@ -38,13 +39,19 @@ impl IotCoreAuthToken {
         IotCoreAuthToken {
             headers: JWTHeaders,
             payload: JWTPayload::new(&config.iotcore.project_id),
-            private_key: Path::new(&config.iotcore.private_key).to_path_buf()
+            private_key: Path::new(&config.iotcore.private_key).to_path_buf(),
+            audience: config.iotcore.project_id.clone()
         }
     }
 
     pub fn issue_new(&self) -> Result<String, frank_jwt::Error> {
         let jwt = encode(json!(self.headers), &self.private_key, &json!(self.payload), Algorithm::RS256)?;
         Ok(jwt)
+    }
+
+    pub fn renew(&mut self) -> Result<String, frank_jwt::Error> {
+        self.payload = JWTPayload::new(&self.audience);
+        self.issue_new()
     }
 }
 
