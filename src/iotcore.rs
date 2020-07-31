@@ -67,13 +67,11 @@ impl IotCoreClient {
 
         let jwt_token = self.jwt_token_factory.renew()?;
 
-        let conn_opts = mqtt::ConnectOptionsBuilder::new()
+        self.conn_opts = mqtt::ConnectOptionsBuilder::new()
             .user_name("not_used")
             .password(jwt_token)
             .ssl_options(self.ssl_opts.clone())
             .finalize();
-        
-        self.conn_opts = conn_opts;
 
         Ok(())
     }
