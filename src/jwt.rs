@@ -61,7 +61,7 @@ impl IotCoreAuthToken {
         let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
 
         if secs_since_epoc.as_secs() > self.payload.exp - threshold {
-            debug!("JWT token has expired.");
+            debug!("JWT token has expired / is expiring within the threshold.");
             return false
         }
 
