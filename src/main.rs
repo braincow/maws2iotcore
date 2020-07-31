@@ -100,7 +100,7 @@ async fn main() {
         Ok(_) =>
             debug!("Unix port exclusivity set to false."),
         Err(error) => {
-            error!("Unable to set UNIX serial port exclusive to false: {}", error);
+            error!("Unable to set UNIX serial port exclusivity to false: {}", error);
             std::process::exit(exitcode::IOERR);
         }
     }
