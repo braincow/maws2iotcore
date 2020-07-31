@@ -62,7 +62,7 @@ impl IotCoreAuthToken {
             return false
         }
         
-        return true
+        true
     }
 }
 
