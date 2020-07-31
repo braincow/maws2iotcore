@@ -84,13 +84,14 @@ async fn main() {
 
     // open the configured serial port
     let settings = tokio_serial::SerialPortSettings::default();
-    let mut port = match tokio_serial::Serial::from_path(config.serial.port, &settings) {
+    let mut port = match tokio_serial::Serial::from_path(config.serial.port.clone(), &settings) {
         Ok(port) => port,
         Err(error) => {
             error!("Unable to open serial port: {}", error);
             std::process::exit(exitcode::IOERR);
         }
     };
+    info!("Expecting MAWS messages from: {}", config.serial.port);
 
     #[cfg(unix)]
     match port.set_exclusive(false) {
