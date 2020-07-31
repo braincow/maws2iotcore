@@ -14,11 +14,9 @@ use std::path::Path;
 use std::env;
 use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
-use paho_mqtt as mqtt;
 use crate::config::read_config;
-use crate::jwt::IotCoreAuthToken;
 use crate::linecodec::LineCodec;
-use crate::iotcore::connect_to_iotcore;
+use crate::iotcore::IotCoreClient;
 
 #[tokio::main]
 async fn main() {
@@ -67,22 +65,19 @@ async fn main() {
         }
     };
 
-    // issue the initial JWT token
-    let jwt_token_factory = IotCoreAuthToken::build(&config);
-    let jwt_token = match jwt_token_factory.issue_new() {
-        Ok(jwt_token) => jwt_token,
+    // create the IotCore MQTT client and connect
+    let mut iotcore_client = match IotCoreClient::build(&config) {
+        Ok(client) => client,
         Err(error) => {
-            error!("Unable to issue a new JWT token: {}", error);
+            error!("Unable to build Iot Core client: {}", error);
             std::process::exit(exitcode::CANTCREAT);
         }
     };
-
-    // create iotcore client and test connectivity
-    let iotcore_client = match connect_to_iotcore(&config, &jwt_token).await {
-        Ok(client) => client,
+    match iotcore_client.connect().await {
+        Ok(_) => {},
         Err(error) => {
-            error!("Unable to connect to IoT Core MQTT broker: {}", error);
-            std::process::exit(exitcode::CANTCREAT);
+            error!("Unable to connect to Iot Core service: {}", error);
+            std::process::exit(exitcode::PROTOCOL);
         }
     };
 
@@ -118,14 +113,12 @@ async fn main() {
         };
         debug!("{:?}", message);
 
-        let mqtt_msg = mqtt::Message::new(config.iotcore.as_iotcore_client_topic(), message.as_json(), mqtt::QOS_1);
-        match iotcore_client.publish(mqtt_msg).await {
+        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(), &message, paho_mqtt::QOS_1).await {
             Ok(_) => {},
             Err(error) => {
-                error!("Failed to publish message over MQTT: {}", error);
-                std::process::exit(exitcode::PROTOCOL);
+                error!("Unable to send a message to IoT core MQTT broker: {}", error);
             }
-        }
+        };
     }
 }
 

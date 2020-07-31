@@ -15,13 +15,13 @@ pub struct JWTPayload {
 }
 
 impl JWTPayload {
-    fn new(audience: &String) -> JWTPayload {
+    fn new(audience: &String, lifetime: &u64) -> JWTPayload {
         let now = SystemTime::now();
         let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
     
         JWTPayload {
             iat: secs_since_epoc.as_secs(),
-            exp: secs_since_epoc.as_secs() + 3600,
+            exp: secs_since_epoc.as_secs() + lifetime,
             aud: audience.clone()
         }
     }
@@ -31,16 +31,18 @@ pub struct IotCoreAuthToken {
     headers: JWTHeaders,
     payload: JWTPayload,
     private_key: PathBuf,
-    audience: String
+    audience: String,
+    lifetime: u64
 }
 
 impl IotCoreAuthToken {
     pub fn build(config: &AppConfig) -> IotCoreAuthToken {
         IotCoreAuthToken {
             headers: JWTHeaders,
-            payload: JWTPayload::new(&config.iotcore.project_id),
+            payload: JWTPayload::new(&config.iotcore.project_id, &config.iotcore.token_lifetime),
             private_key: Path::new(&config.iotcore.private_key).to_path_buf(),
-            audience: config.iotcore.project_id.clone()
+            audience: config.iotcore.project_id.clone(),
+            lifetime: config.iotcore.token_lifetime
         }
     }
 
@@ -50,18 +52,20 @@ impl IotCoreAuthToken {
     }
 
     pub fn renew(&mut self) -> Result<String, frank_jwt::Error> {
-        self.payload = JWTPayload::new(&self.audience);
+        self.payload = JWTPayload::new(&self.audience, &self.lifetime);
         self.issue_new()
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid(&self, threshold: u64) -> bool {
         let now = SystemTime::now();
         let secs_since_epoc = now.duration_since(UNIX_EPOCH).unwrap();
 
-        if secs_since_epoc.as_secs() > self.payload.exp {
+        if secs_since_epoc.as_secs() > self.payload.exp - threshold {
+            debug!("JWT token has expired.");
             return false
         }
-        
+
+        debug!("JWT token hsa not expired.");
         true
     }
 }

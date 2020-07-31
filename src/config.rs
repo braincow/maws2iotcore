@@ -13,7 +13,8 @@ pub struct IotCoreConfig {
     pub project_id: String,
     pub registry_name: String,
     pub registry_region: String,
-    pub ca_certs: String
+    pub ca_certs: String,
+    pub token_lifetime: u64
 }
 
 impl IotCoreConfig {

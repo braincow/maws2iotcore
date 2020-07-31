@@ -10,5 +10,6 @@ project_id = "aina-saa"
 registry_name = "aina-saa-maws"
 registry_region = "europe-west1"
 ca_certs = "roots.pem"
+token_lifetime = 3600 # in seconds
 
 # eof
