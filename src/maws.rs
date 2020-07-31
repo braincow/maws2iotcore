@@ -6,10 +6,24 @@ use serde::Serialize;
  DEBUG maws2iotcore > WIND         0.3    300
 */
 
+trait MAWSParser {
+    fn parse(utf_string: String) -> MAWSMessageKind;
+}
+
 #[derive(Debug, Serialize)]
 pub struct MAWSWindMessage {
     ws_cur: f64, // WScur m/s 
     wd_cur: f64 // WDcur °C
+}
+
+impl MAWSParser for MAWSWindMessage {
+    fn parse(utf_string: String) -> MAWSMessageKind {
+        let string_splitted = utf_string.split("\t").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
+        MAWSMessageKind::WIND(MAWSWindMessage{
+            ws_cur: string_splitted[1].parse().unwrap(),
+            wd_cur: string_splitted[2].parse().unwrap()
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -23,6 +37,23 @@ pub struct MAWSLogMessage {
     pr60s_sum: f64, // PR60sSum mm
     wd2min_avg: f64, // WD2minAvg °C
     ws2min_avg: f64 // WS2minAvg m/s
+}
+
+impl MAWSParser for MAWSLogMessage {
+    fn parse(utf_string: String) -> MAWSMessageKind {
+        let string_splitted = utf_string.split("\t").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
+        MAWSMessageKind::LOG(MAWSLogMessage{
+            ta60s_avg: string_splitted[1].parse().unwrap(),
+            dp60s_avg: string_splitted[2].parse().unwrap(),
+            rh60s_avg: string_splitted[3].parse().unwrap(),
+            pa60s_avg: string_splitted[4].parse().unwrap(),
+            qff60s_avg: string_splitted[5].parse().unwrap(),
+            sr60s_avg: string_splitted[6].parse().unwrap(),
+            pr60s_sum: string_splitted[7].parse().unwrap(),
+            wd2min_avg: string_splitted[8].parse().unwrap(),
+            ws2min_avg: string_splitted[9].parse().unwrap(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -50,6 +81,35 @@ pub struct MAWSPtuMessage {
     pr24h_max: f64 // PR24hMax mm
 }
 
+impl MAWSParser for MAWSPtuMessage {
+    fn parse(utf_string: String) -> MAWSMessageKind {
+        let string_splitted = utf_string.split("\t").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
+        MAWSMessageKind::PTU(MAWSPtuMessage {
+            ta60s_avg: string_splitted[1].parse().unwrap(),
+            ta24h_min: string_splitted[2].parse().unwrap(),
+            ta24h_max: string_splitted[3].parse().unwrap(),
+            dp60s_avg: string_splitted[4].parse().unwrap(),
+            dp24h_min: string_splitted[5].parse().unwrap(),
+            dp24h_max: string_splitted[6].parse().unwrap(),
+            rh60s_avg: string_splitted[7].parse().unwrap(),
+            rh24h_min: string_splitted[8].parse().unwrap(),
+            rh24h_max: string_splitted[9].parse().unwrap(),
+            pa60s_avg: string_splitted[10].parse().unwrap(),
+            pa24h_min: string_splitted[11].parse().unwrap(),
+            pa24h_max: string_splitted[12].parse().unwrap(),
+            qff60s_avg: string_splitted[13].parse().unwrap(),
+            qff24h_min: string_splitted[14].parse().unwrap(),
+            qff24h_max: string_splitted[15].parse().unwrap(),
+            sr60s_avg: string_splitted[16].parse().unwrap(),
+            sr24h_min: string_splitted[17].parse().unwrap(),
+            sr24h_max: string_splitted[18].parse().unwrap(),
+            pr60s_avg: string_splitted[19].parse().unwrap(),
+            pr24h_min: string_splitted[20].parse().unwrap(),
+            pr24h_max: string_splitted[21].parse().unwrap()    
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub enum MAWSMessageKind {
     WIND(MAWSWindMessage),
@@ -60,51 +120,13 @@ pub enum MAWSMessageKind {
 
 impl MAWSMessageKind {
     pub fn parse(utf_string: String) -> MAWSMessageKind {
-        let string_splitted = utf_string.split("\t").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
-        //debug!("Splitted line: {:?}", string_splitted);
-
         let message: MAWSMessageKind;
         if utf_string.starts_with("WIND") {
-            message = MAWSMessageKind::WIND(MAWSWindMessage{
-                ws_cur: string_splitted[1].parse().unwrap(),
-                wd_cur: string_splitted[2].parse().unwrap()
-            });
+            message = MAWSWindMessage::parse(utf_string);
         } else if utf_string.starts_with("LOG") {
-            message = MAWSMessageKind::LOG(MAWSLogMessage{
-                ta60s_avg: string_splitted[1].parse().unwrap(),
-                dp60s_avg: string_splitted[2].parse().unwrap(),
-                rh60s_avg: string_splitted[3].parse().unwrap(),
-                pa60s_avg: string_splitted[4].parse().unwrap(),
-                qff60s_avg: string_splitted[5].parse().unwrap(),
-                sr60s_avg: string_splitted[6].parse().unwrap(),
-                pr60s_sum: string_splitted[7].parse().unwrap(),
-                wd2min_avg: string_splitted[8].parse().unwrap(),
-                ws2min_avg: string_splitted[9].parse().unwrap(),
-            })
+            message = MAWSLogMessage::parse(utf_string);
         } else if utf_string.starts_with("PTU") {
-            message = MAWSMessageKind::PTU(MAWSPtuMessage {
-                ta60s_avg: string_splitted[1].parse().unwrap(),
-                ta24h_min: string_splitted[2].parse().unwrap(),
-                ta24h_max: string_splitted[3].parse().unwrap(),
-                dp60s_avg: string_splitted[4].parse().unwrap(),
-                dp24h_min: string_splitted[5].parse().unwrap(),
-                dp24h_max: string_splitted[6].parse().unwrap(),
-                rh60s_avg: string_splitted[7].parse().unwrap(),
-                rh24h_min: string_splitted[8].parse().unwrap(),
-                rh24h_max: string_splitted[9].parse().unwrap(),
-                pa60s_avg: string_splitted[10].parse().unwrap(),
-                pa24h_min: string_splitted[11].parse().unwrap(),
-                pa24h_max: string_splitted[12].parse().unwrap(),
-                qff60s_avg: string_splitted[13].parse().unwrap(),
-                qff24h_min: string_splitted[14].parse().unwrap(),
-                qff24h_max: string_splitted[15].parse().unwrap(),
-                sr60s_avg: string_splitted[16].parse().unwrap(),
-                sr24h_min: string_splitted[17].parse().unwrap(),
-                sr24h_max: string_splitted[18].parse().unwrap(),
-                pr60s_avg: string_splitted[19].parse().unwrap(),
-                pr24h_min: string_splitted[20].parse().unwrap(),
-                pr24h_max: string_splitted[21].parse().unwrap()    
-            })
+            message = MAWSPtuMessage::parse(utf_string);
         } else {
             warn!("Unrecognized MAWS message!");
             message = MAWSMessageKind::UNKNOWN;
