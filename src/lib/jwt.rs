@@ -2,7 +2,7 @@ use frank_jwt::{Algorithm, encode};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::{Path, PathBuf};
 use serde::Serialize;
-use crate::config::AppConfig;
+use crate::lib::config::AppConfig;
 
 #[derive(Debug, Serialize)]
 pub struct JWTHeaders;

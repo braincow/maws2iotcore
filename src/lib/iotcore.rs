@@ -1,8 +1,8 @@
 use std::path::Path;
 use paho_mqtt as mqtt;
-use crate::config::AppConfig;
-use crate::jwt::IotCoreAuthToken;
-use crate::maws::MAWSMessageKind;
+use crate::lib::config::AppConfig;
+use crate::lib::jwt::IotCoreAuthToken;
+use crate::lib::maws::MAWSMessageKind;
 
 pub struct IotCoreClient {
     ssl_opts: mqtt::SslOptions,

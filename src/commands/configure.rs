@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::fs;
 use dialoguer::Confirm;
-use crate::certificate::SelfSignedCertificate;
-use crate::autodetect;
-use crate::config::AppConfig;
+use crate::lib::certificate::SelfSignedCertificate;
+use crate::lib::autodetect;
+use crate::lib::config::AppConfig;
 
 pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
     // query DNS to acquire information about the registry

@@ -1,7 +1,7 @@
 use std::{io, str};
 use tokio_util::codec::{Decoder, Encoder};
 use bytes::BytesMut;
-use crate::maws::MAWSMessageKind;
+use crate::lib::maws::MAWSMessageKind;
 
 pub struct LineCodec;
 

@@ -1,8 +1,8 @@
 use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
-use crate::config::AppConfig;
-use crate::linecodec::LineCodec;
-use crate::iotcore::IotCoreClient;
+use crate::lib::config::AppConfig;
+use crate::lib::linecodec::LineCodec;
+use crate::lib::iotcore::IotCoreClient;
 
 pub async fn run_subcommand(config_file: &str) {
     // read configuration

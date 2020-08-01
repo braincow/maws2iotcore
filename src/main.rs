@@ -1,11 +1,5 @@
-mod maws;
-mod config;
-mod jwt;
-mod linecodec;
-mod iotcore;
-mod autodetect;
-mod certificate;
 mod commands;
+mod lib;
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_json;
