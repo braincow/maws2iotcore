@@ -3,6 +3,7 @@ mod config;
 mod jwt;
 mod linecodec;
 mod iotcore;
+mod autodetect;
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_json;
@@ -43,6 +44,11 @@ async fn main() {
         .short("c")
         .help("Specify alternate config file location.")
         .default_value(default_config_file_path.to_str().unwrap()))
+    .arg(Arg::with_name("domain")
+        .long("domain")
+        .short("d")
+        .help("Specify alternate DNS domain to use for IOT Core connection settings detection.")
+        .default_value(include_str!("dns.txt")))
     .get_matches();
 
     // if there are environment variable(s) set for rust log
@@ -54,6 +60,8 @@ async fn main() {
     }
     // initialize logger
     pretty_env_logger::try_init_timed().unwrap();
+
+    autodetect::AutoDetectedConfig::build(&matches.value_of("domain").unwrap()).expect("error on querying dns");
 
     info!("Starting {} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
@@ -77,8 +85,7 @@ async fn main() {
     match iotcore_client.connect().await {
         Ok(_) => {},
         Err(error) => {
-            error!("Unable to connect to Iot Core service: {}", error);
-            std::process::exit(exitcode::PROTOCOL);
+            warn!("Unable to initially connect to Iot Core service: {}", error);
         }
     };
 
