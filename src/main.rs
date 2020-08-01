@@ -12,20 +12,74 @@ use clap::{App, Arg};
 use dotenv::dotenv;
 use directories::ProjectDirs;
 use std::path::Path;
-use std::env;
+use std::{fs, env};
 use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
-use crate::config::read_config;
+use dialoguer::Confirm;
+use crate::config::AppConfig;
 use crate::linecodec::LineCodec;
 use crate::iotcore::IotCoreClient;
 
-fn config_subcommand(domain: &str, cafile: &str, pubkey: &str, prikey: &str) {
+async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
+    // query DNS to acquire information about the registry
     let autodetected_config = autodetect::AutoDetectedConfig::build(domain).expect("error on querying dns");
+
+    // create a new configuration file and write to disk
+    let config = AppConfig::build(deviceid, port, cafile, prikey,
+        &autodetected_config.registry_config.project,
+        &autodetected_config.registry_config.name,
+        &autodetected_config.registry_config.region
+    );
+    if configfile.exists() {
+        warn!("Config file '{}' already exists.", configfile.display());
+        if !Confirm::new().with_prompt("Do you wish to overwrite existing configuration file?").default(false).interact().unwrap() {
+            warn!("Aborting.");
+            std::process::exit(exitcode::NOPERM);
+        }
+    }
+    // write the autodetected config to disk
+    match config.write_config(configfile) {
+        Ok(_) => info!("Config file '{}' created.", configfile.display().to_string()),
+        Err(error) => {
+            error!("Unable to create config file '{}': {}", configfile.display().to_string(), error);
+            std::process::exit(exitcode::IOERR);            
+        }
+    };
+
+    // download the CA certificates definied in autodetected configuration and write to disk
+    if cafile.exists() {
+        warn!("Certificate Authority chain file '{}' already exists.", cafile.display());
+        if !Confirm::new().with_prompt("Do you wish to overwrite existing CA file?").default(false).interact().unwrap() {
+            warn!("Aborting.");
+            std::process::exit(exitcode::NOPERM);
+        }
+    }
+    let ca_result = match reqwest::get(&autodetected_config.ca_url).await {
+        Ok(result) => result,
+        Err(error) => {
+            error!("Unable to download CA certificate chain: {}", error);
+            std::process::exit(exitcode::PROTOCOL);
+        }
+    };
+    let ca_pem_contents = match ca_result.text().await {
+        Ok(text) => text,
+        Err(error) => {
+            error!("Unable to download CA certificate chain: {}", error);
+            std::process::exit(exitcode::PROTOCOL);
+        }
+    };
+    match fs::write(cafile, ca_pem_contents) {
+        Ok(_) => info!("Created Certificate Authority File"),
+        Err(error) => {
+            error!("Unable to create Certificate Chain file '{}': {}", cafile.display().to_string(), error);
+            std::process::exit(exitcode::IOERR);
+        }
+    }
 }
 
 async fn run_subcommand(config_file: &str) {
     // read configuration
-    let config = match read_config(config_file) {
+    let config = match AppConfig::read_config(config_file) {
         Ok(config) => config,
         Err(error) => {
             error!("Unable to open the config file: {}", error);
@@ -131,6 +185,12 @@ async fn main() {
                 .version(env!("CARGO_PKG_VERSION")) // read the version string from cargo.toml
                 .author(env!("CARGO_PKG_AUTHORS")) // and for the author(s) information as well
                 .about("Create configuration and authentication files.")
+                .arg(Arg::with_name("deviceid")
+                    .long("device-id")
+                    .short("i")
+                    .help("Specify ID (name) of this device as it is known by the IoT Core registry.")
+                    .takes_value(true)
+                    .required(true))
                 .arg(Arg::with_name("domain")
                     .long("domain")
                     .short("d")
@@ -151,6 +211,11 @@ async fn main() {
                     .short("p")
                     .help("Specify alternate location of the private key file.")
                     .default_value(default_prikey_file_path.to_str().unwrap()))
+                .arg(Arg::with_name("port")
+                    .long("port")
+                    .short("t")
+                    .help("Specify alternate location of the RS232 port.")
+                    .default_value("/dev/ttyr00"))
         )
         .get_matches();
 
@@ -165,6 +230,22 @@ async fn main() {
     pretty_env_logger::try_init_timed().unwrap();
     info!("Starting {} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
+    // initialize software default data folders
+    match fs::create_dir_all(project_dirs.config_dir()) {
+        Ok(_) => debug!("Created application default config directory '{}'", project_dirs.config_dir().display()),
+        Err(error) => {
+            error!("Failed to create default application config folder '{}': {}", project_dirs.config_dir().display(), error);
+            std::process::exit(exitcode::IOERR);
+        }
+    };
+    match fs::create_dir_all(project_dirs.data_dir()) {
+        Ok(_) => debug!("Created application data directory '{}'", project_dirs.data_dir().display()),
+        Err(error) => {
+            error!("Failed to create default application data folder '{}': {}", project_dirs.data_dir().display(), error);
+            std::process::exit(exitcode::IOERR);
+        }
+    };
+
     if matches.is_present("run") {
         run_subcommand(&matches.value_of("config").unwrap()).await;
         std::process::exit(exitcode::OK);
@@ -172,11 +253,14 @@ async fn main() {
 
     if matches.is_present("configure") {
         config_subcommand(
+            &matches.subcommand_matches("configure").unwrap().value_of("deviceid").unwrap(),
+            &Path::new(matches.value_of("config").unwrap()),
             &matches.subcommand_matches("configure").unwrap().value_of("domain").unwrap(),
-            &matches.subcommand_matches("configure").unwrap().value_of("cafile").unwrap(),
-            &matches.subcommand_matches("configure").unwrap().value_of("pubkey").unwrap(),
-            &matches.subcommand_matches("configure").unwrap().value_of("prikey").unwrap()
-        );
+            &matches.subcommand_matches("configure").unwrap().value_of("port").unwrap(),
+            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("cafile").unwrap()),
+            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("pubkey").unwrap()),
+            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("prikey").unwrap())
+        ).await;
         std::process::exit(exitcode::OK);
     }
 

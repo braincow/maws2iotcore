@@ -25,5 +25,7 @@ frank_jwt = "3.1"
 serde_json = "1.0"
 resolve = "0.2"
 base64 = "0.12"
+reqwest = "0.10"
+dialoguer = "0.6"
 
 # eof

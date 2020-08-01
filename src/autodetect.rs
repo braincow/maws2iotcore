@@ -32,15 +32,15 @@ impl Error for AutoDetectError {
 
 #[derive(Debug, Deserialize)]
 pub struct RegistryConfig {
-    project: String,
-    name: String,
-    region: String
+    pub project: String,
+    pub name: String,
+    pub region: String
 }
 
 pub struct AutoDetectedConfig {
-    mqtt_url: String,
-    ca_url: String,
-    registry_config: RegistryConfig
+    pub mqtt_url: String,
+    pub ca_url: String,
+    pub registry_config: RegistryConfig
 }
 
 impl AutoDetectedConfig {
