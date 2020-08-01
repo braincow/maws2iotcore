@@ -20,6 +20,55 @@ use crate::config::AppConfig;
 use crate::linecodec::LineCodec;
 use crate::iotcore::IotCoreClient;
 
+use openssl::x509::{X509, X509Name};
+use openssl::pkey::PKey;
+use openssl::hash::MessageDigest;
+use openssl::rsa::Rsa;
+use openssl::nid::Nid;
+use openssl::asn1::Asn1Time;
+
+struct SelfSignedCertificate {
+    certificate: X509,
+    private_key: openssl::pkey::PKey<openssl::pkey::Private>
+}
+
+impl SelfSignedCertificate {
+    fn build_certificate() -> Result<SelfSignedCertificate, openssl::error::ErrorStack> {
+        let rsa = Rsa::generate(2048)?;
+        let pkey = PKey::from_rsa(rsa)?;
+    
+        let mut name = X509Name::builder()?;
+        name.append_entry_by_nid(Nid::COMMONNAME, "not_used")?;
+        let name = name.build();
+    
+        let mut builder = X509::builder()?;
+        builder.set_version(2)?;
+        builder.set_subject_name(&name)?;
+        builder.set_issuer_name(&name)?;
+        builder.set_pubkey(&pkey)?;
+        builder.set_not_before(Asn1Time::days_from_now(0)?.as_ref())?;
+        builder.set_not_after(Asn1Time::days_from_now(3650)?.as_ref())?;
+        builder.sign(&pkey, MessageDigest::sha256())?;
+    
+        let certificate: X509 = builder.build();
+    
+        Ok(SelfSignedCertificate {
+            certificate: certificate,
+            private_key: pkey
+        })
+    }
+
+    fn as_certificate_pem(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let pem = self.certificate.to_pem()?;
+        Ok(String::from_utf8(pem)?)
+    }
+
+    fn as_private_key_pem(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let rsa = self.private_key.rsa()?;
+        Ok(String::from_utf8(rsa.private_key_to_pem()?)?)
+    }
+}
+
 async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
     // query DNS to acquire information about the registry
     let autodetected_config = autodetect::AutoDetectedConfig::build(domain).expect("error on querying dns");
@@ -75,6 +124,39 @@ async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port
             std::process::exit(exitcode::IOERR);
         }
     }
+
+    // create locally X509 certificate and private key
+    let x509 = SelfSignedCertificate::build_certificate().unwrap();
+    let cert_pem = x509.as_certificate_pem().unwrap();
+    if pubkey.exists() {
+        warn!("Certificate file '{}' already exists.", pubkey.display());
+        if !Confirm::new().with_prompt("Do you wish to overwrite existing certificate?").default(false).interact().unwrap() {
+            warn!("Aborting.");
+            std::process::exit(exitcode::NOPERM);
+        }
+    }
+    match fs::write(pubkey, cert_pem) {
+        Ok(_) => info!("Wrote certificate file '{}'", pubkey.display()),
+        Err(error) => {
+            error!("Unable to write certificate file '{}': {}", pubkey.display().to_string(), error);
+            std::process::exit(exitcode::IOERR);
+        }
+    };
+    let key_pem = x509.as_private_key_pem().unwrap();
+    if prikey.exists() {
+        warn!("Private key file '{}' already exists.", prikey.display());
+        if !Confirm::new().with_prompt("Do you wish to overwrite existing private key?").default(false).interact().unwrap() {
+            warn!("Aborting.");
+            std::process::exit(exitcode::NOPERM);
+        }
+    }
+    match fs::write(prikey, key_pem) {
+        Ok(_) => info!("Wrote private key file '{}'", prikey.display()),
+        Err(error) => {
+            error!("Unable to write private key file '{}': {}", prikey.display().to_string(), error);
+            std::process::exit(exitcode::IOERR);
+        }
+    };
 }
 
 async fn run_subcommand(config_file: &str) {

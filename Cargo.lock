@@ -803,6 +803,7 @@ dependencies = [
  "frank_jwt",
  "futures 0.3.5",
  "log 0.4.11",
+ "openssl",
  "paho-mqtt",
  "pretty_env_logger",
  "reqwest",
