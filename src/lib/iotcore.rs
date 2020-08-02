@@ -149,17 +149,34 @@ impl IotCoreClient {
         })
     }
 
-    pub async fn connect(&mut self) -> Result<(), mqtt::Error> {
-        // take stream from client prior to connecting it
-        let mut stream = self.client.get_stream(25);
+    fn parse_cnc_message(&self, msg: mqtt::Message) {
 
+    }
+
+    async fn subscribe(&self) -> Result<(), mqtt::Error> {
+        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
+        trace!("Subscribing to command and control channels in IoT core service");
+        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
+
+        self.client.set_message_callback(move |_cli, msg| {
+            debug!("{:?}", msg);
+            match msg {
+                Some(msg) => {
+                    self.parse_cnc_message(msg)
+                },
+                None => {}
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn connect(&mut self) -> Result<(), mqtt::Error> {
         // connect
         self.client.connect(self.conn_opts.clone()).await?;
         info!("Connected to IoT core service");
 
-        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
-        trace!("Subscribing to command and control channels in IoT core service");
-        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
+        self.subscribe().await?;
 
         Ok(())
     }
