@@ -91,8 +91,10 @@ async fn main() {
     //  overwrite them here since command line arguments have higher priority
     match matches.occurrences_of("verbose") {
         0 => env::set_var("RUST_LOG", "error"),
-        1 => env::set_var("RUST_LOG", "info"),
-        _ => env::set_var("RUST_LOG", "debug")
+        1 => env::set_var("RUST_LOG", "warn"),
+        2 => env::set_var("RUST_LOG", "info"),
+        3 => env::set_var("RUST_LOG", "debug"),
+        _ => env::set_var("RUST_LOG", "trace")
     }
     // initialize logger
     pretty_env_logger::try_init_timed().unwrap();
