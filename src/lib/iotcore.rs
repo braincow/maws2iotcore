@@ -4,6 +4,22 @@ use crate::lib::config::AppConfig;
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
 
+pub enum IotCoreTopicType {
+    EVENT,
+    CONFIG,
+    CMD
+}
+
+impl IotCoreTopicType {
+    pub fn value(&self) -> String {
+        match *self {
+            IotCoreTopicType::EVENT => "events".to_string(),
+            IotCoreTopicType::CONFIG => "config".to_string(),
+            IotCoreTopicType::CMD => "commands/#".to_string()
+        }
+    }
+}
+
 pub struct IotCoreClient {
     ssl_opts: mqtt::SslOptions,
     conn_opts: mqtt::ConnectOptions,
