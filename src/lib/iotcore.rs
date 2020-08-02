@@ -21,6 +21,7 @@ impl IotCoreTopicType {
 }
 
 pub struct IotCoreClient {
+    subscribe_to_topics: [String; 2],
     ssl_opts: mqtt::SslOptions,
     conn_opts: mqtt::ConnectOptions,
     client: mqtt::async_client::AsyncClient,
@@ -53,17 +54,28 @@ impl IotCoreClient {
             .ssl_options(ssl_options.clone())
             .finalize();
 
+        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CMD) ];
+
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
             conn_opts: conn_opts,
             client: cli,
-            jwt_token_factory: jwt_token_factory
+            jwt_token_factory: jwt_token_factory,
+            subscribe_to_topics: subscribe_to_topics
         })
+    }
+
+    async fn subscribe(&self) -> Result<(), mqtt::Error> {
+        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
+        trace!("Subscribing to command and control channels in IoT core service");
+        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
+        Ok(())
     }
 
     pub async fn connect(&self) -> Result<(), mqtt::Error> {
         self.client.connect(self.conn_opts.clone()).await?;
         info!("Connected to IoT core service");
+        self.subscribe().await?;
         Ok(())
     }
 

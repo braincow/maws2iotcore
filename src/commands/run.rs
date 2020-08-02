@@ -28,7 +28,6 @@ pub async fn run_subcommand(config_file: &str) {
             warn!("Unable to initially connect to Iot Core service: {}", error);
         }
     };
-
     // open the configured serial port
     let settings = tokio_serial::SerialPortSettings::default();
     let mut port = match tokio_serial::Serial::from_path(config.serial.port.clone(), &settings) {
