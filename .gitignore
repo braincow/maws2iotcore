@@ -3,3 +3,4 @@ rsa_private.pem
 rsa_cert.pem
 roots.pem
 /src/dns.txt
+.vscode/

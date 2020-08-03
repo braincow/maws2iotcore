@@ -31,9 +31,6 @@ impl IotCoreConfig {
     }
 
     pub fn as_iotcore_client_topic(&self, msgtype: IotCoreTopicType) -> String {
-        // /devices/device-id/events (publish)
-        // /devices/device-id/config (subscribe)
-        // /devices/device-id/commands/# (subscribe)
         let topic = format!("/devices/{}/{}", self.device_id, msgtype.value());
 
         topic
