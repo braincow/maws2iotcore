@@ -65,7 +65,7 @@ impl IotCoreAuthToken {
             return false
         }
 
-        debug!("JWT token hsa not expired.");
+        debug!("JWT token has not expired.");
         true
     }
 }

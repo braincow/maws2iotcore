@@ -7,7 +7,13 @@ use crate::lib::config::AppConfig;
 
 pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
     // query DNS to acquire information about the registry
-    let autodetected_config = autodetect::AutoDetectedConfig::build(domain).expect("error on querying dns");
+    let autodetected_config = match autodetect::AutoDetectedConfig::build(domain) {
+        Ok(config) => config,
+        Err(error) => {
+            error!("Error while autodetecting settings from DNS: {}", error);
+            std::process::exit(exitcode::OSERR);
+        }
+    };
 
     // create a new configuration file and write to disk
     let config = AppConfig::build(deviceid, port, cafile, prikey,
@@ -24,9 +30,9 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
     }
     // write the autodetected config to disk
     match config.write_config(configfile) {
-        Ok(_) => info!("Config file '{}' created.", configfile.display().to_string()),
+        Ok(_) => info!("Config file '{}' created.", configfile.display()),
         Err(error) => {
-            error!("Unable to create config file '{}': {}", configfile.display().to_string(), error);
+            error!("Unable to create config file '{}': {}", configfile.display(), error);
             std::process::exit(exitcode::IOERR);            
         }
     };
@@ -56,13 +62,19 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
     match fs::write(cafile, ca_pem_contents) {
         Ok(_) => info!("Created Certificate Authority File"),
         Err(error) => {
-            error!("Unable to create Certificate Chain file '{}': {}", cafile.display().to_string(), error);
+            error!("Unable to create Certificate Chain file '{}': {}", cafile.display(), error);
             std::process::exit(exitcode::IOERR);
         }
     }
 
     // create locally X509 certificate and private key
-    let x509 = SelfSignedCertificate::build_certificate().unwrap();
+    let x509 = match SelfSignedCertificate::build_certificate() {
+        Ok(cert) => cert,
+        Err(error) => {
+            error!("Unable to build self signed certificate: {}", error);
+            std::process::exit(exitcode::CANTCREAT);
+        }
+    };
     let cert_pem = x509.as_certificate_pem().unwrap();
     if pubkey.exists() {
         warn!("Certificate file '{}' already exists.", pubkey.display());
@@ -74,7 +86,7 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
     match fs::write(pubkey, cert_pem) {
         Ok(_) => info!("Wrote certificate file '{}'", pubkey.display()),
         Err(error) => {
-            error!("Unable to write certificate file '{}': {}", pubkey.display().to_string(), error);
+            error!("Unable to write certificate file '{}': {}", pubkey.display(), error);
             std::process::exit(exitcode::IOERR);
         }
     };
@@ -89,8 +101,10 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
     match fs::write(prikey, key_pem) {
         Ok(_) => info!("Wrote private key file '{}'", prikey.display()),
         Err(error) => {
-            error!("Unable to write private key file '{}': {}", prikey.display().to_string(), error);
+            error!("Unable to write private key file '{}': {}", prikey.display(), error);
             std::process::exit(exitcode::IOERR);
         }
     };
 }
+
+// eof
