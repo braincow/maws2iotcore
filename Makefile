@@ -20,4 +20,10 @@ get-root:
 rsa_private.pem:
 	openssl req -x509 -newkey rsa:2048 -keyout rsa_private.pem -nodes  -out rsa_cert.pem -subj "/CN=unused"
 
+rustup-install:
+	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+fedora-build-prep:
+	dnf install make openssl-devel systemd-devel cmake paho-c-devel g++
+
 # eof
