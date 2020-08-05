@@ -83,7 +83,7 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
             std::process::exit(exitcode::NOPERM);
         }
     }
-    match fs::write(pubkey, cert_pem) {
+    match fs::write(pubkey, cert_pem.clone()) {
         Ok(_) => info!("Wrote certificate file '{}'", pubkey.display()),
         Err(error) => {
             error!("Unable to write certificate file '{}': {}", pubkey.display(), error);
@@ -105,6 +105,12 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
             std::process::exit(exitcode::IOERR);
         }
     };
+
+    // finalize configuration by conviniently showing to the user the contents of the public key
+    println!("");
+    println!("Use following X509 certificate (RS256_X509) as public key in IoT core when setting up this device:");
+    println!("{}", cert_pem);
+    println!("");
 }
 
 // eof
