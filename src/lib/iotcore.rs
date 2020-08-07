@@ -1,5 +1,3 @@
-#![feature(async_closure)]
-
 use actix::prelude::*;
 use std::path::Path;
 use paho_mqtt as mqtt;
@@ -11,6 +9,7 @@ use crate::lib::config::AppConfig;
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
 use crate::lib::logger::LoggerActor;
+use futures::stream::StreamExt;
 
 #[derive(Debug, Deserialize)]
 struct IotCoreCommand {
@@ -187,22 +186,24 @@ impl IotCoreClient {
     }
 */
     async fn subscribe(&mut self) -> Result<(), mqtt::Error> {
-        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
-        trace!("Subscribing to command and control channels in IoT core service");
-        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
+        let mut mqtt_stream = self.client.get_stream(64);
 
         let logger_addr = self.logger_addr.clone();
 
-        self.client.set_message_callback(async move |_cli, msg| {
-            debug!("{:?}", msg);
-            match msg {
-                Some(msg) => {
-                    // so far only config is implemented
-                    logger_addr.send(IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap()).await;
-                },
-                None => {}
+        let handle = tokio::spawn(async move {
+            while let Some(msg_opt) = mqtt_stream.next().await {
+                match msg_opt {
+                    Some(msg) => {
+                        let status = logger_addr.send(IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap()).await;
+                    },
+                    None => warn!("Empty CNC message. I am probably disconnected.")
+                }
             }
-        }.await);
+        });
+
+        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
+        trace!("Subscribing to command and control channels in IoT core service");
+        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
 
         Ok(())
     }
