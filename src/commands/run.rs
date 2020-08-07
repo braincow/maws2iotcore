@@ -1,8 +1,10 @@
+use actix::prelude::*;
 use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
 use crate::lib::config::AppConfig;
 use crate::lib::linecodec::LineCodec;
 use crate::lib::iotcore::{IotCoreClient, IotCoreTopicType};
+use crate::lib::logger::LoggerActor;
 
 pub async fn run_subcommand(config_file: &str) {
     // read configuration
@@ -14,8 +16,10 @@ pub async fn run_subcommand(config_file: &str) {
         }
     };
 
+    let logger = LoggerActor.start();
+
     // create the IotCore MQTT client and connect
-    let mut iotcore_client = match IotCoreClient::build(&config) {
+    let mut iotcore_client = match IotCoreClient::build(&config, logger) {
         Ok(client) => client,
         Err(error) => {
             error!("Unable to build Iot Core client: {}", error);

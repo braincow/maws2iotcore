@@ -12,7 +12,7 @@ use std::{fs, env};
 use crate::commands::configure::config_subcommand;
 use crate::commands::run::run_subcommand;
 
-#[tokio::main]
+#[actix_rt::main]
 async fn main() {
     // initialize dot environment so we can pull arguments from env, env files,
     //  commandline or as hardcoded values in code

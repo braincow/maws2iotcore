@@ -5,3 +5,4 @@ pub mod iotcore;
 pub mod jwt;
 pub mod linecodec;
 pub mod maws;
+pub mod logger;

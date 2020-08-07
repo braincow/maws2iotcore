@@ -28,5 +28,7 @@ base64 = "0.12"
 reqwest = "0.10"
 dialoguer = "0.6"
 openssl = "0.10"
+actix = "0.9"
+actix-rt = "1.1"
 
 # eof

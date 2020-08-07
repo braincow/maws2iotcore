@@ -1,29 +1,39 @@
+#![feature(async_closure)]
+
+use actix::prelude::*;
 use std::path::Path;
 use paho_mqtt as mqtt;
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 use std::error::Error;
 use std::{str, fmt};
+use actix::Addr;
 use crate::lib::config::AppConfig;
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
+use crate::lib::logger::LoggerActor;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
+struct IotCoreCommand {
+    command: String
+}
+
+#[derive(Debug, Deserialize)]
 struct IotCoreSerialConfig {
     port: String
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct IotCoreTCPConfig {
     host: String,
     port: u64
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct IotCorePropertiesConfig {
     relay_messages: Vec<String>
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct IotCoreLoggerConfig {
     r#type: String,
     serial: IotCoreSerialConfig,
@@ -31,10 +41,27 @@ struct IotCoreLoggerConfig {
     autostart: bool
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct IotCoreConfig {
     logger: IotCoreLoggerConfig,
     iotcore: IotCorePropertiesConfig
+}
+
+#[derive(Debug)]
+pub enum IotCoreCNCMessageKind {
+    CONFIG(IotCoreConfig),
+    COMMAND(IotCoreCommand)
+}
+
+impl IotCoreCNCMessageKind {
+    pub fn parse_from_mqtt_message(message: &paho_mqtt::message::Message) -> Result<IotCoreCNCMessageKind, serde_json::Error> {
+        let parsed: IotCoreConfig = serde_json::from_str(&message.payload_str().to_string())?;
+        Ok(IotCoreCNCMessageKind::CONFIG(parsed))
+    }
+}
+
+impl Message for IotCoreCNCMessageKind {
+    type Result = bool;
 }
 
 impl IotCoreConfig {
@@ -72,7 +99,7 @@ impl Error for IotCoreTopicError {
 pub enum IotCoreTopicType {
     EVENT,
     CONFIG,
-    CMD
+    COMMAND
 }
 
 impl IotCoreTopicType {
@@ -80,7 +107,7 @@ impl IotCoreTopicType {
         match *self {
             IotCoreTopicType::EVENT => "events".to_string(),
             IotCoreTopicType::CONFIG => "config".to_string(),
-            IotCoreTopicType::CMD => "commands/#".to_string()
+            IotCoreTopicType::COMMAND => "commands/#".to_string()
         }
     }
 
@@ -96,11 +123,15 @@ impl IotCoreTopicType {
             return Ok(IotCoreTopicType::EVENT)
         } else if IotCoreTopicType::CONFIG.value() == string_parts[3] {
             return Ok(IotCoreTopicType::CONFIG)
-        } else if IotCoreTopicType::CMD.value() == string_parts[3] {
-            return Ok(IotCoreTopicType::CMD)
+        } else if IotCoreTopicType::COMMAND.value() == string_parts[3] {
+            return Ok(IotCoreTopicType::COMMAND)
         } else {
             return Err(IotCoreTopicError::new("Unrecognized topic in input string."))
         }
+    }
+
+    pub fn from_message(message: &paho_mqtt::message::Message) -> Result<IotCoreTopicType, IotCoreTopicError> {
+        Ok(IotCoreTopicType::from_str(&message.topic().to_string())?)
     }
 }
 
@@ -109,11 +140,12 @@ pub struct IotCoreClient {
     ssl_opts: mqtt::SslOptions,
     conn_opts: mqtt::ConnectOptions,
     client: mqtt::async_client::AsyncClient,
-    jwt_token_factory: IotCoreAuthToken
+    jwt_token_factory: IotCoreAuthToken,
+    logger_addr: Addr<LoggerActor>
 }
 
 impl IotCoreClient {
-    pub fn build(config: &AppConfig) -> Result<IotCoreClient, Box<dyn std::error::Error>> {
+    pub fn build(config: &AppConfig, logger: Addr<LoggerActor>) -> Result<IotCoreClient, Box<dyn std::error::Error>> {
         let create_opts = mqtt::CreateOptionsBuilder::new()
             .client_id(config.iotcore.as_iotcore_client_id())
             .mqtt_version(mqtt::types::MQTT_VERSION_3_1_1)
@@ -138,35 +170,39 @@ impl IotCoreClient {
             .ssl_options(ssl_options.clone())
             .finalize();
 
-        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CMD) ];
+        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::COMMAND) ];
 
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
             conn_opts: conn_opts,
             client: cli,
             jwt_token_factory: jwt_token_factory,
-            subscribe_to_topics: subscribe_to_topics
+            subscribe_to_topics: subscribe_to_topics,
+            logger_addr: logger
         })
     }
-
+/*
     fn parse_cnc_message(&self, msg: mqtt::Message) {
 
     }
-
-    async fn subscribe(&self) -> Result<(), mqtt::Error> {
+*/
+    async fn subscribe(&mut self) -> Result<(), mqtt::Error> {
         // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
         trace!("Subscribing to command and control channels in IoT core service");
         self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
 
-        self.client.set_message_callback(move |_cli, msg| {
+        let logger_addr = self.logger_addr.clone();
+
+        self.client.set_message_callback(async move |_cli, msg| {
             debug!("{:?}", msg);
             match msg {
                 Some(msg) => {
-                    self.parse_cnc_message(msg)
+                    // so far only config is implemented
+                    logger_addr.send(IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap()).await;
                 },
                 None => {}
             }
-        });
+        }.await);
 
         Ok(())
     }
