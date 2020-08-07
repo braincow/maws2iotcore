@@ -1,8 +1,73 @@
 use std::path::Path;
 use paho_mqtt as mqtt;
+use serde::{Serialize, Deserialize};
+use std::error::Error;
+use std::{str, fmt};
 use crate::lib::config::AppConfig;
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IotCoreSerialConfig {
+    port: String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IotCoreTCPConfig {
+    host: String,
+    port: u64
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IotCorePropertiesConfig {
+    relay_messages: Vec<String>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IotCoreLoggerConfig {
+    r#type: String,
+    serial: IotCoreSerialConfig,
+    tcp: IotCoreTCPConfig,
+    autostart: bool
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IotCoreConfig {
+    logger: IotCoreLoggerConfig,
+    iotcore: IotCorePropertiesConfig
+}
+
+impl IotCoreConfig {
+    fn from_json_string(json_string: String) -> Result<IotCoreConfig, serde_json::Error> {
+        let config: IotCoreConfig = serde_json::from_str(&json_string)?;
+        Ok(config)
+    }
+}
+
+#[derive(Debug)]
+pub struct IotCoreTopicError {
+    details: String
+}
+
+impl IotCoreTopicError {
+    fn new(msg: &str) -> IotCoreTopicError {
+        IotCoreTopicError {
+            details: msg.to_string()
+        }
+    }
+}
+
+impl fmt::Display for IotCoreTopicError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,"{}",self.details)
+    }
+}
+
+impl Error for IotCoreTopicError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
 
 pub enum IotCoreTopicType {
     EVENT,
@@ -18,9 +83,29 @@ impl IotCoreTopicType {
             IotCoreTopicType::CMD => "commands/#".to_string()
         }
     }
+
+    pub fn from_str(source_string: &String) -> Result<IotCoreTopicType, IotCoreTopicError> {
+        let string_parts = source_string.split("/").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
+
+        if string_parts.len() != 4 {
+            // expecting splitted string to be of length four
+            return Err(IotCoreTopicError::new("Unable to properly split the topic string."))
+        }
+
+        if IotCoreTopicType::EVENT.value() == string_parts[3] {
+            return Ok(IotCoreTopicType::EVENT)
+        } else if IotCoreTopicType::CONFIG.value() == string_parts[3] {
+            return Ok(IotCoreTopicType::CONFIG)
+        } else if IotCoreTopicType::CMD.value() == string_parts[3] {
+            return Ok(IotCoreTopicType::CMD)
+        } else {
+            return Err(IotCoreTopicError::new("Unrecognized topic in input string."))
+        }
+    }
 }
 
 pub struct IotCoreClient {
+    subscribe_to_topics: [String; 2],
     ssl_opts: mqtt::SslOptions,
     conn_opts: mqtt::ConnectOptions,
     client: mqtt::async_client::AsyncClient,
@@ -53,17 +138,46 @@ impl IotCoreClient {
             .ssl_options(ssl_options.clone())
             .finalize();
 
+        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CMD) ];
+
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
             conn_opts: conn_opts,
             client: cli,
-            jwt_token_factory: jwt_token_factory
+            jwt_token_factory: jwt_token_factory,
+            subscribe_to_topics: subscribe_to_topics
         })
     }
 
-    pub async fn connect(&self) -> Result<(), mqtt::Error> {
+    fn parse_cnc_message(&self, msg: mqtt::Message) {
+
+    }
+
+    async fn subscribe(&self) -> Result<(), mqtt::Error> {
+        // note the array of QOS arguments, there is one QOS for each subscribed topic. in our case two
+        trace!("Subscribing to command and control channels in IoT core service");
+        self.client.subscribe_many(&self.subscribe_to_topics, &[ mqtt::QOS_1, mqtt::QOS_1] ).await?;
+
+        self.client.set_message_callback(move |_cli, msg| {
+            debug!("{:?}", msg);
+            match msg {
+                Some(msg) => {
+                    self.parse_cnc_message(msg)
+                },
+                None => {}
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn connect(&mut self) -> Result<(), mqtt::Error> {
+        // connect
         self.client.connect(self.conn_opts.clone()).await?;
         info!("Connected to IoT core service");
+
+        self.subscribe().await?;
+
         Ok(())
     }
 
