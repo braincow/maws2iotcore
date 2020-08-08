@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::fs;
 use std::path::Path;
-use crate::lib::iotcore::IotCoreTopicType;
+use crate::lib::iotcore::IotCoreTopicTypeKind;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SerialConfig {
@@ -30,7 +30,7 @@ impl IotCoreConfig {
         client_id
     }
 
-    pub fn as_iotcore_client_topic(&self, msgtype: IotCoreTopicType, subfolder: Option<String>) -> String {
+    pub fn as_iotcore_client_topic(&self, msgtype: IotCoreTopicTypeKind, subfolder: Option<String>) -> String {
         let topic = format!("/devices/{}/{}", self.device_id, msgtype.value(subfolder));
         topic
     }

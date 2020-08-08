@@ -5,11 +5,13 @@ use serde::Deserialize;
 use std::error::Error;
 use std::{str, fmt};
 use actix::Addr;
+use futures::stream::StreamExt;
 use crate::lib::config::AppConfig;
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
 use crate::lib::logger::LoggerActor;
-use futures::stream::StreamExt;
+
+// ------------------------- IoT Core CNC message types ------------------------- //
 
 #[derive(Debug, Deserialize)]
 pub struct IotCoreCommand {
@@ -60,18 +62,35 @@ pub enum IotCoreCNCMessageKind {
 }
 
 impl IotCoreCNCMessageKind {
-    pub fn parse_from_mqtt_message(message: &paho_mqtt::message::Message) -> Result<Option<IotCoreCNCMessageKind>, serde_json::Error> {
+    pub fn parse_from_mqtt_message(message: &paho_mqtt::message::Message) -> Result<Option<IotCoreCNCMessageKind>, IotCoreCNCMessageError> {
         let mut parsed = None;
-        // @TODO: fix the unwrap
-        match IotCoreTopicType::from_message(&message).unwrap() {
-            IotCoreTopicType::CONFIG => {
-                parsed = Some(IotCoreCNCMessageKind::CONFIG(IotCoreConfig::from_json_string(&message.payload_str().to_string())?));
-            },
-            IotCoreTopicType::COMMAND => {
-                parsed = Some(IotCoreCNCMessageKind::COMMAND(IotCoreCommand::from_json_string(&message.payload_str().to_string())?));
-            },
-            IotCoreTopicType::EVENT => warn!("I'm not supposed to receive EVENT type messages through CNC channels! Disgarding message.")
+
+        let topic = match IotCoreTopicTypeKind::from_message(&message) {
+            Ok(msg) => msg,
+            Err(error) => {
+                return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC topic: {}", error)));
+            }
         };
+        match topic {
+            IotCoreTopicTypeKind::CONFIG => {
+                match IotCoreConfig::from_json_string(&message.payload_str().to_string()) {
+                    Ok(msg) => parsed = Some(IotCoreCNCMessageKind::CONFIG(msg)),
+                    Err(error) => {
+                        return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC config message: {}", error)));
+                    }
+                };
+            },
+            IotCoreTopicTypeKind::COMMAND => {
+                match IotCoreCommand::from_json_string(&message.payload_str().to_string()) {
+                    Ok(msg) => parsed = Some(IotCoreCNCMessageKind::COMMAND(msg)),
+                    Err(error) => {
+                        return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC command message: {}", error)));
+                    }
+                };
+            },
+            IotCoreTopicTypeKind::EVENT => warn!("I'm not supposed to receive EVENT type messages through CNC channels! Disgarding message.")
+        };
+
         Ok(parsed)
     }
 }
@@ -86,6 +105,12 @@ impl IotCoreConfig {
         Ok(config)
     }
 }
+
+type IotCoreCNCMessageError = IotCoreTopicError;
+
+// ------------------------- IoT Core CNC message types end --------------------- //
+
+// ------------------------- IoT Core CNC topic types ------------------------- //
 
 #[derive(Debug)]
 pub struct IotCoreTopicError {
@@ -112,19 +137,18 @@ impl Error for IotCoreTopicError {
     }
 }
 
-// @TODO: fix to be "Kind" in the name
-pub enum IotCoreTopicType {
+pub enum IotCoreTopicTypeKind {
     EVENT,
     CONFIG,
     COMMAND
 }
 
-impl IotCoreTopicType {
+impl IotCoreTopicTypeKind {
     pub fn value(&self, sub_folder: Option<String>) -> String {
         match *self {
-            IotCoreTopicType::EVENT => "events".to_string(),
-            IotCoreTopicType::CONFIG => "config".to_string(),
-            IotCoreTopicType::COMMAND => {
+            IotCoreTopicTypeKind::EVENT => "events".to_string(),
+            IotCoreTopicTypeKind::CONFIG => "config".to_string(),
+            IotCoreTopicTypeKind::COMMAND => {
                 match sub_folder {
                     None => "commands/#".to_string(),
                     Some(folder) => format!("commands/{}", folder)
@@ -133,7 +157,7 @@ impl IotCoreTopicType {
         }
     }
 
-    pub fn from_str(source_string: &String) -> Result<IotCoreTopicType, IotCoreTopicError> {
+    pub fn from_str(source_string: &String) -> Result<IotCoreTopicTypeKind, IotCoreTopicError> {
         let string_parts = source_string.split("/").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
 
         if string_parts.len() < 4 || string_parts.len() > 5 {
@@ -151,27 +175,34 @@ impl IotCoreTopicType {
         let mut topic_with_subfolder = topic.clone();
         if sub_folder.is_some() {
             topic_with_subfolder = format!("{}/{}", topic.clone(), sub_folder.clone().unwrap());
+        } else {
+            // @TODO: this is an ugly way to do this. fix later.
+            if topic == "commands" {
+                topic_with_subfolder = format!("{}/#", topic.clone());
+            }
         }
 
         if topic_with_subfolder != topic {
             topic = topic_with_subfolder;
         }
 
-        if IotCoreTopicType::EVENT.value(sub_folder.clone()) == topic {
-            return Ok(IotCoreTopicType::EVENT)
-        } else if IotCoreTopicType::CONFIG.value(sub_folder.clone()) == topic {
-            return Ok(IotCoreTopicType::CONFIG)
-        } else if IotCoreTopicType::COMMAND.value(sub_folder.clone()) == topic {
-            return Ok(IotCoreTopicType::COMMAND)
+        if IotCoreTopicTypeKind::EVENT.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::EVENT)
+        } else if IotCoreTopicTypeKind::CONFIG.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::CONFIG)
+        } else if IotCoreTopicTypeKind::COMMAND.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::COMMAND)
         } else {
             return Err(IotCoreTopicError::new(&format!("Unrecognized parsed topic '{}' in '{}'", string_parts[3], source_string)))
         }
     }
 
-    pub fn from_message(message: &paho_mqtt::message::Message) -> Result<IotCoreTopicType, IotCoreTopicError> {
-        Ok(IotCoreTopicType::from_str(&message.topic().to_string())?)
+    pub fn from_message(message: &paho_mqtt::message::Message) -> Result<IotCoreTopicTypeKind, IotCoreTopicError> {
+        Ok(IotCoreTopicTypeKind::from_str(&message.topic().to_string())?)
     }
 }
+
+// ------------------------- IoT Core CNC topic types end --------------------- //
 
 pub struct IotCoreClient {
     subscribe_to_topics: [String; 2],
@@ -208,7 +239,7 @@ impl IotCoreClient {
             .ssl_options(ssl_options.clone())
             .finalize();
 
-        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG, None), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::COMMAND, None) ];
+        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::CONFIG, None), config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::COMMAND, None) ];
 
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
@@ -230,16 +261,27 @@ impl IotCoreClient {
             while let Some(msg_opt) = mqtt_stream.next().await {
                 match msg_opt {
                     Some(msg) => {
-                        // @TODO fix unwrap
-                        match IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap() {
+                        let cncmsg = match IotCoreCNCMessageKind::parse_from_mqtt_message(&msg) {
+                            Ok(cncmsg) => cncmsg,
+                            Err(error) => {
+                                error!("Error on parsing MQTT cnc message: {}", error);
+                                continue;
+                            }
+                        };
+                        match cncmsg {
                             Some(cnc_message) => {
-                                // @TODO fix unwrap
-                                logger_addr.send(cnc_message).await.unwrap();
+                                match logger_addr.send(cnc_message).await {
+                                    Ok(_) => {},
+                                    Err(error) => {
+                                        error!("Error while communicating with logger actor: {}", error);
+                                        continue;
+                                    }
+                                }
                             },
-                            None => warn!("None type CNC message.")
+                            None => warn!("None CNC message.")
                         };
                     },
-                    None => warn!("Empty CNC message. I am probably disconnected.")
+                    None => warn!("None CNC message.")
                 }
             }
         });

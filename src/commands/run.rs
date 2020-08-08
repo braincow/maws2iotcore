@@ -3,7 +3,7 @@ use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
 use crate::lib::config::AppConfig;
 use crate::lib::linecodec::LineCodec;
-use crate::lib::iotcore::{IotCoreClient, IotCoreTopicType};
+use crate::lib::iotcore::{IotCoreClient, IotCoreTopicTypeKind};
 use crate::lib::logger::LoggerActor;
 
 pub async fn run_subcommand(config_file: &str) {
@@ -66,7 +66,7 @@ pub async fn run_subcommand(config_file: &str) {
         };
         debug!("{:?}", message);
 
-        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(IotCoreTopicType::EVENT, None), &message, paho_mqtt::QOS_1).await {
+        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::EVENT, None), &message, paho_mqtt::QOS_1).await {
             Ok(_) => {},
             Err(error) => {
                 error!("Unable to send a message to IoT core MQTT broker: {}", error);
