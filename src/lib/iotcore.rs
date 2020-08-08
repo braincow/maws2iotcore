@@ -12,8 +12,15 @@ use crate::lib::logger::LoggerActor;
 use futures::stream::StreamExt;
 
 #[derive(Debug, Deserialize)]
-struct IotCoreCommand {
+pub struct IotCoreCommand {
     command: String
+}
+
+impl IotCoreCommand {
+    fn from_json_string(json_string: &String) -> Result<IotCoreCommand, serde_json::Error> {
+        let command: IotCoreCommand = serde_json::from_str(&json_string)?;
+        Ok(command)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,7 +48,7 @@ struct IotCoreLoggerConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct IotCoreConfig {
+pub struct IotCoreConfig {
     logger: IotCoreLoggerConfig,
     iotcore: IotCorePropertiesConfig
 }
@@ -53,9 +60,19 @@ pub enum IotCoreCNCMessageKind {
 }
 
 impl IotCoreCNCMessageKind {
-    pub fn parse_from_mqtt_message(message: &paho_mqtt::message::Message) -> Result<IotCoreCNCMessageKind, serde_json::Error> {
-        let parsed: IotCoreConfig = serde_json::from_str(&message.payload_str().to_string())?;
-        Ok(IotCoreCNCMessageKind::CONFIG(parsed))
+    pub fn parse_from_mqtt_message(message: &paho_mqtt::message::Message) -> Result<Option<IotCoreCNCMessageKind>, serde_json::Error> {
+        let mut parsed = None;
+        // @TODO: fix the unwrap
+        match IotCoreTopicType::from_message(&message).unwrap() {
+            IotCoreTopicType::CONFIG => {
+                parsed = Some(IotCoreCNCMessageKind::CONFIG(IotCoreConfig::from_json_string(&message.payload_str().to_string())?));
+            },
+            IotCoreTopicType::COMMAND => {
+                parsed = Some(IotCoreCNCMessageKind::COMMAND(IotCoreCommand::from_json_string(&message.payload_str().to_string())?));
+            },
+            IotCoreTopicType::EVENT => warn!("I'm not supposed to receive EVENT type messages through CNC channels! Disgarding message.")
+        };
+        Ok(parsed)
     }
 }
 
@@ -64,7 +81,7 @@ impl Message for IotCoreCNCMessageKind {
 }
 
 impl IotCoreConfig {
-    fn from_json_string(json_string: String) -> Result<IotCoreConfig, serde_json::Error> {
+    fn from_json_string(json_string: &String) -> Result<IotCoreConfig, serde_json::Error> {
         let config: IotCoreConfig = serde_json::from_str(&json_string)?;
         Ok(config)
     }
@@ -95,6 +112,7 @@ impl Error for IotCoreTopicError {
     }
 }
 
+// @TODO: fix to be "Kind" in the name
 pub enum IotCoreTopicType {
     EVENT,
     CONFIG,
@@ -102,30 +120,51 @@ pub enum IotCoreTopicType {
 }
 
 impl IotCoreTopicType {
-    pub fn value(&self) -> String {
+    pub fn value(&self, sub_folder: Option<String>) -> String {
         match *self {
             IotCoreTopicType::EVENT => "events".to_string(),
             IotCoreTopicType::CONFIG => "config".to_string(),
-            IotCoreTopicType::COMMAND => "commands/#".to_string()
+            IotCoreTopicType::COMMAND => {
+                match sub_folder {
+                    None => "commands/#".to_string(),
+                    Some(folder) => format!("commands/{}", folder)
+                }
+            }
         }
     }
 
     pub fn from_str(source_string: &String) -> Result<IotCoreTopicType, IotCoreTopicError> {
         let string_parts = source_string.split("/").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
 
-        if string_parts.len() != 4 {
-            // expecting splitted string to be of length four
-            return Err(IotCoreTopicError::new("Unable to properly split the topic string."))
+        if string_parts.len() < 4 || string_parts.len() > 5 {
+            // expecting splitted string to be of length four or five
+            return Err(IotCoreTopicError::new(&format!("Unable to properly split the topic string '{}' since it has {} parts.", source_string, string_parts.len())))
         }
 
-        if IotCoreTopicType::EVENT.value() == string_parts[3] {
+        let mut topic = string_parts[3].to_string();
+
+        let mut sub_folder = None;
+        if string_parts.len() == 5 {
+            sub_folder = Some(string_parts[4].to_string());
+        }
+
+        let mut topic_with_subfolder = topic.clone();
+        if sub_folder.is_some() {
+            topic_with_subfolder = format!("{}/{}", topic.clone(), sub_folder.clone().unwrap());
+        }
+
+        if topic_with_subfolder != topic {
+            topic = topic_with_subfolder;
+        }
+
+        if IotCoreTopicType::EVENT.value(sub_folder.clone()) == topic {
             return Ok(IotCoreTopicType::EVENT)
-        } else if IotCoreTopicType::CONFIG.value() == string_parts[3] {
+        } else if IotCoreTopicType::CONFIG.value(sub_folder.clone()) == topic {
             return Ok(IotCoreTopicType::CONFIG)
-        } else if IotCoreTopicType::COMMAND.value() == string_parts[3] {
+        } else if IotCoreTopicType::COMMAND.value(sub_folder.clone()) == topic {
             return Ok(IotCoreTopicType::COMMAND)
         } else {
-            return Err(IotCoreTopicError::new("Unrecognized topic in input string."))
+            return Err(IotCoreTopicError::new(&format!("Unrecognized parsed topic '{}' in '{}'", string_parts[3], source_string)))
         }
     }
 
@@ -169,7 +208,7 @@ impl IotCoreClient {
             .ssl_options(ssl_options.clone())
             .finalize();
 
-        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::COMMAND) ];
+        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicType::CONFIG, None), config.iotcore.as_iotcore_client_topic(IotCoreTopicType::COMMAND, None) ];
 
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
@@ -180,21 +219,25 @@ impl IotCoreClient {
             logger_addr: logger
         })
     }
-/*
-    fn parse_cnc_message(&self, msg: mqtt::Message) {
 
-    }
-*/
     async fn subscribe(&mut self) -> Result<(), mqtt::Error> {
         let mut mqtt_stream = self.client.get_stream(64);
 
         let logger_addr = self.logger_addr.clone();
 
-        let handle = tokio::spawn(async move {
+        // @TODO fix disconnect with handle
+        let _handle = tokio::spawn(async move {
             while let Some(msg_opt) = mqtt_stream.next().await {
                 match msg_opt {
                     Some(msg) => {
-                        let status = logger_addr.send(IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap()).await;
+                        // @TODO fix unwrap
+                        match IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap() {
+                            Some(cnc_message) => {
+                                // @TODO fix unwrap
+                                logger_addr.send(cnc_message).await.unwrap();
+                            },
+                            None => warn!("None type CNC message.")
+                        };
                     },
                     None => warn!("Empty CNC message. I am probably disconnected.")
                 }

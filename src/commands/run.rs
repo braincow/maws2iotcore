@@ -66,7 +66,7 @@ pub async fn run_subcommand(config_file: &str) {
         };
         debug!("{:?}", message);
 
-        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(IotCoreTopicType::EVENT), &message, paho_mqtt::QOS_1).await {
+        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(IotCoreTopicType::EVENT, None), &message, paho_mqtt::QOS_1).await {
             Ok(_) => {},
             Err(error) => {
                 error!("Unable to send a message to IoT core MQTT broker: {}", error);

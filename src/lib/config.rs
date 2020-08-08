@@ -30,9 +30,8 @@ impl IotCoreConfig {
         client_id
     }
 
-    pub fn as_iotcore_client_topic(&self, msgtype: IotCoreTopicType) -> String {
-        let topic = format!("/devices/{}/{}", self.device_id, msgtype.value());
-
+    pub fn as_iotcore_client_topic(&self, msgtype: IotCoreTopicType, subfolder: Option<String>) -> String {
+        let topic = format!("/devices/{}/{}", self.device_id, msgtype.value(subfolder));
         topic
     }
 }

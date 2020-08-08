@@ -11,8 +11,7 @@ impl Handler<IotCoreCNCMessageKind> for LoggerActor {
     type Result = bool;
 
     fn handle(&mut self, msg: IotCoreCNCMessageKind, _: &mut Context<Self>) -> Self::Result {
-        trace!("actix result handle for iotcorecncmessage received: {:?}", msg);
-
+        info!("actix result handle for iotcorecncmessage received: {:?}", msg);
         true
     }
 }
