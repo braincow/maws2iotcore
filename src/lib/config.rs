@@ -1,14 +1,15 @@
 use serde::{Serialize, Deserialize};
 use std::fs;
 use std::path::Path;
+use std::clone::Clone;
 use crate::lib::iotcore::IotCoreTopicTypeKind;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SerialConfig {
     pub port: String
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IotCoreConfig {
     pub device_id: String,
     pub private_key: String,
@@ -36,7 +37,7 @@ impl IotCoreConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub serial: SerialConfig,
     pub iotcore: IotCoreConfig

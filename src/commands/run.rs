@@ -16,7 +16,7 @@ pub async fn run_subcommand(config_file: &str) {
         }
     };
 
-    let logger = LoggerActor.start();
+    let logger = LoggerActor{app_config: Some(config.clone()), auto_config: None, iot_config: None}.start();
 
     // create the IotCore MQTT client and connect
     let mut iotcore_client = match IotCoreClient::build(&config, logger) {
