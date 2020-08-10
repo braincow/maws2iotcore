@@ -1,34 +1,11 @@
 use resolve::{DnsConfig, DnsResolver};
 use resolve::record::{Srv, Txt};
 use serde::Deserialize;
-use std::error::Error;
-use std::{str, fmt};
+use std::str;
 use base64::decode;
+use crate::lib::error::MawsToIotCoreError;
 
-#[derive(Debug)]
-pub struct AutoDetectError {
-    details: String
-}
-
-impl AutoDetectError {
-    fn new(msg: &str) -> AutoDetectError {
-        AutoDetectError {
-            details: msg.to_string()
-        }
-    }
-}
-
-impl fmt::Display for AutoDetectError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"{}",self.details)
-    }
-}
-
-impl Error for AutoDetectError {
-    fn description(&self) -> &str {
-        &self.details
-    }
-}
+type AutoDetectError = MawsToIotCoreError;
 
 #[derive(Debug, Deserialize)]
 pub struct RegistryConfig {

@@ -2,38 +2,15 @@ use std::path::Path;
 use std::fs;
 use dialoguer::Confirm;
 use crate::lib::certificate::SelfSignedCertificate;
-use crate::lib::autodetect;
-use crate::lib::config::AppConfig;
+use crate::lib::autodetect::AutoDetectedConfig;
 
-pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, port: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
+pub async fn config_subcommand(deviceid: &str, domain: &str, cafile: &Path, pubkey: &Path, prikey: &Path) {
     // query DNS to acquire information about the registry
-    let autodetected_config = match autodetect::AutoDetectedConfig::build(domain) {
+    let autodetected_config = match AutoDetectedConfig::build(domain) {
         Ok(config) => config,
         Err(error) => {
             error!("Error while autodetecting settings from DNS: {}", error);
             std::process::exit(exitcode::OSERR);
-        }
-    };
-
-    // create a new configuration file and write to disk
-    let config = AppConfig::build(deviceid, port, cafile, prikey,
-        &autodetected_config.registry_config.project,
-        &autodetected_config.registry_config.name,
-        &autodetected_config.registry_config.region
-    );
-    if configfile.exists() {
-        warn!("Config file '{}' already exists.", configfile.display());
-        if !Confirm::new().with_prompt("Do you wish to overwrite existing configuration file?").default(false).interact().unwrap() {
-            warn!("Aborting.");
-            std::process::exit(exitcode::NOPERM);
-        }
-    }
-    // write the autodetected config to disk
-    match config.write_config(configfile) {
-        Ok(_) => info!("Config file '{}' created.", configfile.display()),
-        Err(error) => {
-            error!("Unable to create config file '{}': {}", configfile.display(), error);
-            std::process::exit(exitcode::IOERR);            
         }
     };
 
@@ -68,7 +45,7 @@ pub async fn config_subcommand(deviceid: &str, configfile: &Path, domain: &str, 
     }
 
     // create locally X509 certificate and private key
-    let x509 = match SelfSignedCertificate::build_certificate() {
+    let x509 = match SelfSignedCertificate::build_certificate(&deviceid, &domain) {
         Ok(cert) => cert,
         Err(error) => {
             error!("Unable to build self signed certificate: {}", error);

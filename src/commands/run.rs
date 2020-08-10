@@ -1,76 +1,72 @@
 use actix::prelude::*;
-use futures::stream::StreamExt;
-use tokio_util::codec::Decoder;
-use crate::lib::config::AppConfig;
-use crate::lib::linecodec::LineCodec;
-use crate::lib::iotcore::{IotCoreClient, IotCoreTopicTypeKind};
-use crate::lib::logger::LoggerActor;
+use std::path::Path;
+use openssl::nid::Nid;
+use addr::Email;
+use crate::lib::autodetect::AutoDetectedConfig;
+use crate::lib::logger::{UpdateIotCoreActorAddressMessage, LoggerActor};
+use crate::lib::iotcore::{UpdateLoggerActorAddressMessage, IotCoreActor};
+use crate::lib::certificate::SelfSignedCertificate;
 
-pub async fn run_subcommand(config_file: &str) {
-    // read configuration
-    let config = match AppConfig::read_config(config_file) {
-        Ok(config) => config,
+pub async fn run_subcommand(cacertpath: &Path, certpath: &Path, keypath: &Path) {
+    // load in the (self signed) certificate
+    let cert = match SelfSignedCertificate::load_cerfificate_and_key(certpath, keypath) {
+        Ok(cert) => cert,
         Err(error) => {
-            error!("Unable to open the config file: {}", error);
-            std::process::exit(exitcode::CONFIG);
+            error!("Error while loading configured certificate and/or key: {}", error);
+            std::process::exit(exitcode::IOERR);
         }
     };
 
-    let logger = LoggerActor{app_config: Some(config.clone()), auto_config: None, iot_config: None}.start();
-
-    // create the IotCore MQTT client and connect
-    let mut iotcore_client = match IotCoreClient::build(&config, logger) {
-        Ok(client) => client,
+    // parse email address out of the common name field in the certificate
+    let cn: Email = match cert.certificate().subject_name().entries_by_nid(Nid::COMMONNAME).into_iter().next().unwrap().data().as_utf8().unwrap().parse() {
+        Ok(email) => email,
         Err(error) => {
-            error!("Unable to build Iot Core client: {}", error);
+            error!("Error while parsing client id and domain information from certificate CN= field: {}", error);
             std::process::exit(exitcode::CANTCREAT);
         }
     };
-    match iotcore_client.connect().await {
-        Ok(_) => {},
+
+    // query DNS to acquire information about the registry location etc
+    let autodetected_config = match AutoDetectedConfig::build(&cn.host().to_string()) {
+        Ok(config) => config,
         Err(error) => {
-            warn!("Unable to initially connect to Iot Core service: {}", error);
+            error!("Error while autodetecting settings from DNS: {}", error);
+            std::process::exit(exitcode::OSERR);
         }
     };
 
-    // open the configured serial port
-    let settings = tokio_serial::SerialPortSettings::default();
-    let mut port = match tokio_serial::Serial::from_path(config.serial.port.clone(), &settings) {
-        Ok(port) => port,
+    // build actors
+    let iotcore_actor = match IotCoreActor::build(&cn.user().to_string(), &autodetected_config, &cacertpath, &certpath, &keypath) {
+        Ok(actor) => actor,
         Err(error) => {
-            error!("Unable to open serial port: {}", error);
-            std::process::exit(exitcode::IOERR);
+            error!("Error while creating iotcore client: {}", error);
+            std::process::exit(exitcode::CANTCREAT);
         }
     };
-    info!("Expecting MAWS messages from: {}", config.serial.port);
+    let logger_actor = LoggerActor::build();
 
-    #[cfg(unix)]
-    match port.set_exclusive(false) {
-        Ok(_) =>
-            debug!("Unix port exclusivity set to false."),
-        Err(error) => {
-            error!("Unable to set UNIX serial port exclusivity to false: {}", error);
-            std::process::exit(exitcode::IOERR);
-        }
-    }
+    // start actors
+    let iotcore_addr = iotcore_actor.start();
+    let logger_addr = logger_actor.start();
 
-    let mut reader = LineCodec.framed(port);
+    // update both actors with info about each others addresses
+    // @TODO: is there a better way of doing this?
+    // @TODO: fix the error handling
+    match logger_addr.send(UpdateIotCoreActorAddressMessage{
+        iotcore_address: iotcore_addr.clone()
+    }).await {
+        Ok(_resp) => {},
+        Err(_error) => {}
+    };
 
-    while let Some(message_result) = reader.next().await {
-        let message = match message_result {
-            Ok(message) => message,
-            Err(error) => {
-                error!("Failed to read data over the serial line: {}", error);
-                std::process::exit(exitcode::IOERR);
-            }
-        };
-        debug!("{:?}", message);
+    match iotcore_addr.send(UpdateLoggerActorAddressMessage{
+        logger_address: logger_addr.clone()
+    }).await {
+        Ok(_resp) => {},
+        Err(_error) => {}
+    };
 
-        match iotcore_client.send_message(&config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::EVENT, None), &message, paho_mqtt::QOS_1).await {
-            Ok(_) => {},
-            Err(error) => {
-                error!("Unable to send a message to IoT core MQTT broker: {}", error);
-            }
-        };
-    }
+    tokio::signal::ctrl_c().await.unwrap();
+    warn!("Ctrl-C received, shutting down");
+    System::current().stop();
 }

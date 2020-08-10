@@ -20,7 +20,6 @@ async fn main() {
 
     // project dirs are located somewhere in the system based on arch and os
     let project_dirs = ProjectDirs::from("me", "bcow", env!("CARGO_PKG_NAME")).unwrap();
-    let default_config_file_path = Path::new(project_dirs.config_dir()).join("maws2iotcore.toml");
     let default_ca_file_path = Path::new(project_dirs.data_dir()).join("ca.pem");
     let default_pubkey_file_path = Path::new(project_dirs.data_dir()).join("public.pem");
     let default_prikey_file_path = Path::new(project_dirs.data_dir()).join("private.pem");
@@ -36,11 +35,23 @@ async fn main() {
                 .multiple(true)
                 .help("Sets the level of verbosity. Specifying multiple flags increases verbosity.")
                 .global(true))
-            .arg(Arg::with_name("config") // define config file path and as a default use the autodetected one.
-                .long("config")
-                .short("c")
-                .help("Specify alternate config file location.")
-                .default_value(default_config_file_path.to_str().unwrap())
+            .arg(Arg::with_name("cafile")
+                .long("ca")
+                .short("a")
+                .help("Specify alternate location of the CA certificate chain file.")
+                .default_value(default_ca_file_path.to_str().unwrap())
+                .global(true))
+            .arg(Arg::with_name("pubkey")
+                .long("public-certificate")
+                .short("e")
+                .help("Specify alternate location of the public certificate file.")
+                .default_value(default_pubkey_file_path.to_str().unwrap())
+                .global(true))
+            .arg(Arg::with_name("prikey")
+                .long("private-key")
+                .short("p")
+                .help("Specify alternate location of the private key file.")
+                .default_value(default_prikey_file_path.to_str().unwrap())
                 .global(true))
         .subcommand(
             App::new("run")
@@ -63,27 +74,7 @@ async fn main() {
                     .long("domain")
                     .short("d")
                     .help("Specify alternate DNS domain to use for IOT Core connection settings detection.")
-                    .default_value(include_str!("dns.txt")))
-                .arg(Arg::with_name("cafile")
-                    .long("ca")
-                    .short("a")
-                    .help("Specify alternate location of the CA certificate chain file.")
-                    .default_value(default_ca_file_path.to_str().unwrap()))
-                .arg(Arg::with_name("pubkey")
-                    .long("public-certificate")
-                    .short("e")
-                    .help("Specify alternate location of the public certificate file.")
-                    .default_value(default_pubkey_file_path.to_str().unwrap()))
-                .arg(Arg::with_name("prikey")
-                    .long("private-key")
-                    .short("p")
-                    .help("Specify alternate location of the private key file.")
-                    .default_value(default_prikey_file_path.to_str().unwrap()))
-                .arg(Arg::with_name("port")
-                    .long("port")
-                    .short("t")
-                    .help("Specify alternate location of the RS232 port.")
-                    .default_value("/dev/ttyr00"))
+                    .default_value(include_str!("domain.txt")))
         )
         .get_matches();
 
@@ -101,13 +92,6 @@ async fn main() {
     info!("Starting {} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
     // initialize software default data folders
-    match fs::create_dir_all(project_dirs.config_dir()) {
-        Ok(_) => debug!("Created application default config directory '{}'", project_dirs.config_dir().display()),
-        Err(error) => {
-            error!("Failed to create default application config folder '{}': {}", project_dirs.config_dir().display(), error);
-            std::process::exit(exitcode::IOERR);
-        }
-    };
     match fs::create_dir_all(project_dirs.data_dir()) {
         Ok(_) => debug!("Created application data directory '{}'", project_dirs.data_dir().display()),
         Err(error) => {
@@ -117,19 +101,21 @@ async fn main() {
     };
 
     if matches.is_present("run") {
-        run_subcommand(&matches.value_of("config").unwrap()).await;
+        run_subcommand(
+            &Path::new(matches.value_of("cafile").unwrap()),
+            &Path::new(matches.value_of("pubkey").unwrap()),
+            &Path::new(matches.value_of("prikey").unwrap())
+        ).await;
         std::process::exit(exitcode::OK);
     }
 
     if matches.is_present("configure") {
         config_subcommand(
             &matches.subcommand_matches("configure").unwrap().value_of("deviceid").unwrap(),
-            &Path::new(matches.value_of("config").unwrap()),
             &matches.subcommand_matches("configure").unwrap().value_of("domain").unwrap(),
-            &matches.subcommand_matches("configure").unwrap().value_of("port").unwrap(),
-            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("cafile").unwrap()),
-            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("pubkey").unwrap()),
-            &Path::new(matches.subcommand_matches("configure").unwrap().value_of("prikey").unwrap())
+            &Path::new(matches.value_of("cafile").unwrap()),
+            &Path::new(matches.value_of("pubkey").unwrap()),
+            &Path::new(matches.value_of("prikey").unwrap())
         ).await;
         std::process::exit(exitcode::OK);
     }

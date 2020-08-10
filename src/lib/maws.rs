@@ -1,3 +1,4 @@
+use actix::prelude::*;
 use serde::Serialize;
 
 /*
@@ -138,6 +139,10 @@ impl MAWSMessageKind {
     pub fn as_json(&self) -> String {
         serde_json::to_string(self).unwrap()
     }
+}
+
+impl Message for MAWSMessageKind {
+    type Result = bool;
 }
 
 // eof

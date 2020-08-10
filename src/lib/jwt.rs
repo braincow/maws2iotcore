@@ -2,7 +2,6 @@ use frank_jwt::{Algorithm, encode};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::{Path, PathBuf};
 use serde::Serialize;
-use crate::lib::config::AppConfig;
 
 #[derive(Debug, Serialize)]
 pub struct JWTHeaders;
@@ -32,17 +31,15 @@ pub struct IotCoreAuthToken {
     payload: JWTPayload,
     private_key: PathBuf,
     audience: String,
-    lifetime: u64
 }
 
 impl IotCoreAuthToken {
-    pub fn build(config: &AppConfig) -> IotCoreAuthToken {
+    pub fn build(project_id: &String, keypath: &Path) -> IotCoreAuthToken {
         IotCoreAuthToken {
             headers: JWTHeaders,
-            payload: JWTPayload::new(&config.iotcore.project_id, &config.iotcore.token_lifetime),
-            private_key: Path::new(&config.iotcore.private_key).to_path_buf(),
-            audience: config.iotcore.project_id.clone(),
-            lifetime: config.iotcore.token_lifetime
+            payload: JWTPayload::new(project_id, &3600),
+            private_key: keypath.to_path_buf(),
+            audience: project_id.clone()
         }
     }
 
@@ -52,7 +49,7 @@ impl IotCoreAuthToken {
     }
 
     pub fn renew(&mut self) -> Result<String, frank_jwt::Error> {
-        self.payload = JWTPayload::new(&self.audience, &self.lifetime);
+        self.payload = JWTPayload::new(&self.audience, &3600);
         self.issue_new()
     }
 
