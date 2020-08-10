@@ -4,7 +4,7 @@ use paho_mqtt as mqtt;
 use serde::Deserialize;
 use std::str;
 use actix::Addr;
-use futures::stream::StreamExt;
+use futures::{stream::StreamExt, executor::block_on};
 use crate::lib::jwt::IotCoreAuthToken;
 use crate::lib::maws::MAWSMessageKind;
 use crate::lib::logger::LoggerActor;
@@ -23,16 +23,14 @@ impl Message for UpdateLoggerActorAddressMessage {
 
 pub struct IotCoreActor {
     iotcore_client: IotCoreClient,
-    logger_address: Option<Addr<LoggerActor>>
 }
 
 impl IotCoreActor {
     pub fn build(client_id: &String, autodetected_config: &AutoDetectedConfig, cacertpath: &Path, certpath: &Path, keypath: &Path) -> Result<IotCoreActor, IotCoreClientError> {
         // create the IotCore MQTT client and connect
-        let mut iotcore_client = IotCoreClient::build(client_id, autodetected_config, cacertpath, certpath, keypath)?;
+        let iotcore_client = IotCoreClient::build(client_id, autodetected_config, cacertpath, certpath, keypath)?;
         Ok(IotCoreActor{
-            iotcore_client: iotcore_client,
-            logger_address: None
+            iotcore_client: iotcore_client
         })
     }
 }
@@ -40,15 +38,16 @@ impl IotCoreActor {
 impl Actor for IotCoreActor {
     type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Context<Self>) {
-/*
-    match iotcore_client.connect().await {
-        Ok(_) => {},
-        Err(error) => {
-            warn!("Unable to initially connect to Iot Core service: {}", error);
+    fn started(&mut self, _ctx: &mut Context<Self>) {
+        // do an initial connection, we reconnect during message send if this fails
+        match block_on(async {
+            self.iotcore_client.connect().await?;
+            // Explicit return type for the async block
+            Ok::<(), mqtt::Error>(())
+        }) {
+            Ok(_) => {},
+            Err(error) => warn!("Unable to initially connect to Iot Core service: {}", error)
         }
-    };
-*/
     }
 }
 
@@ -56,7 +55,7 @@ impl Handler<UpdateLoggerActorAddressMessage> for IotCoreActor {
     type Result = bool;
 
     fn handle(&mut self, msg: UpdateLoggerActorAddressMessage, _: &mut Context<Self>) -> Self::Result {
-        self.logger_address = Some(msg.logger_address);
+        self.iotcore_client.logger_address = Some(msg.logger_address);
         
         true
     }
@@ -247,17 +246,18 @@ impl IotCoreTopicTypeKind {
 type IotCoreClientError = MawsToIotCoreError;
 
 pub struct IotCoreClient {
-//    subscribe_to_topics: [String; 2],
+    subscribe_to_topics: [String; 2],
     ssl_opts: mqtt::SslOptions,
     conn_opts: mqtt::ConnectOptions,
     client: mqtt::async_client::AsyncClient,
     jwt_token_factory: IotCoreAuthToken,
+    logger_address: Option<Addr<LoggerActor>>
 }
 
 impl IotCoreClient {
-    pub fn build(client_id: &String, autodetected_config: &AutoDetectedConfig, cacertpath: &Path, certpath: &Path, keypath: &Path) -> Result<IotCoreClient, IotCoreClientError> {
+    pub fn build(device_id: &String, autodetected_config: &AutoDetectedConfig, cacertpath: &Path, certpath: &Path, keypath: &Path) -> Result<IotCoreClient, IotCoreClientError> {
         let create_opts = mqtt::CreateOptionsBuilder::new()
-            .client_id(client_id)
+            .client_id(device_id)
             .mqtt_version(mqtt::types::MQTT_VERSION_3_1_1)
             .server_uri(autodetected_config.mqtt_url.clone())
             .persistence(mqtt::PersistenceType::None)
@@ -281,26 +281,32 @@ impl IotCoreClient {
             Err(error) => return Err(IotCoreClientError::new(&format!("Error while issuing JWT token: {}", error)))
         };
         let conn_opts = mqtt::ConnectOptionsBuilder::new()
-            .user_name(client_id) // not really used, can be anything
+            .user_name(device_id) // not really used, can be anything
             .password(jwt_token)
             .ssl_options(ssl_options.clone())
             .finalize();
+
+        let subscribe_to_topics = [
+            format!("/devices/{}/{}", device_id, IotCoreTopicTypeKind::CONFIG.value(None)),
+            format!("/devices/{}/{}", device_id, IotCoreTopicTypeKind::COMMAND.value(None))
+            // config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::CONFIG, None),
+            // config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::COMMAND, None)
+            ];
 
         Ok(IotCoreClient {
             ssl_opts: ssl_options,
             conn_opts: conn_opts,
             client: cli,
-            jwt_token_factory: jwt_token_factory
+            jwt_token_factory: jwt_token_factory,
+            subscribe_to_topics: subscribe_to_topics,
+            logger_address: None
         })
     }
 
-
-/*    async fn subscribe(&mut self) -> Result<(), mqtt::Error> {
+    async fn subscribe(&mut self) -> Result<(), mqtt::Error> {
         let mut mqtt_stream = self.client.get_stream(64);
 
-//        let logger_addr = self.logger_addr.clone();
-
-//        let subscribe_to_topics = [ config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::CONFIG, None), config.iotcore.as_iotcore_client_topic(IotCoreTopicTypeKind::COMMAND, None) ];
+        let logger_addr = self.logger_address.clone().unwrap();
 
         // @TODO fix disconnect with handle
         let _handle = tokio::spawn(async move {
@@ -338,13 +344,13 @@ impl IotCoreClient {
 
         Ok(())
     }
-*/
+
     pub async fn connect(&mut self) -> Result<(), mqtt::Error> {
         // connect
         self.client.connect(self.conn_opts.clone()).await?;
         info!("Connected to IoT core service");
 
-        //self.subscribe().await?;
+        self.subscribe().await?;
 
         Ok(())
     }
