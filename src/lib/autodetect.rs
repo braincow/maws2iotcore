@@ -40,7 +40,7 @@ impl AutoDetectedConfig {
         };
         debug!("MQTT SRV record(s): {:?}", mqtt_srv_record);
         let mqtt_url = match mqtt_srv_record.first() {
-            Some(srv) => format!("ssl://{}:{}", srv.target, srv.port),
+            Some(srv) => format!("ssl://{}:{}", srv.target.trim_end_matches("."), srv.port),
             None => return Err(AutoDetectError::new(&format!("DNS SRV record '{}' did not resolve to a value.", mqtt_srv_record_name)))
         };
 
