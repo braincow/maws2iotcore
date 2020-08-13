@@ -3,10 +3,10 @@ use futures::stream::StreamExt;
 use tokio_util::codec::Decoder;
 use crate::lib::linecodec::LineCodec;
 use crate::lib::iotcore::IotCoreTopicTypeKind;
-use crate::lib::iotcore::{IotCoreCNCMessageKind, IotCoreConfig, IotCoreActor};
+use crate::lib::iotcore::{IotCoreCNCMessageKind, IotCoreConfig, MessageActor};
 
 pub struct UpdateIotCoreActorAddressMessage {
-    pub iotcore_address: Addr<IotCoreActor>
+    pub iotcore_address: Addr<MessageActor>
 }
 
 impl Message for UpdateIotCoreActorAddressMessage {
@@ -15,7 +15,7 @@ impl Message for UpdateIotCoreActorAddressMessage {
 
 pub struct LoggerActor {
     iotcore_config: Option<IotCoreConfig>,
-    iotcore_address: Option<Addr<IotCoreActor>>
+    iotcore_address: Option<Addr<MessageActor>>
 }
 
 impl LoggerActor {

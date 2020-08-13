@@ -1,10 +1,10 @@
-use actix::prelude::*;
 use std::path::Path;
 use openssl::nid::Nid;
 use addr::Email;
 use crate::lib::autodetect::AutoDetectedConfig;
-use crate::lib::logger::{UpdateIotCoreActorAddressMessage, LoggerActor};
-use crate::lib::iotcore::{UpdateLoggerActorAddressMessage, IotCoreActor};
+/*use crate::lib::logger::{UpdateIotCoreActorAddressMessage, LoggerActor};
+use crate::lib::iotcore::{UpdateLoggerActorAddressMessage, IotCoreActor};*/
+use crate::lib::iotcore::IotCoreClient;
 use crate::lib::certificate::SelfSignedCertificate;
 
 pub async fn run_subcommand(cacertpath: &Path, certpath: &Path, keypath: &Path) {
@@ -35,6 +35,11 @@ pub async fn run_subcommand(cacertpath: &Path, certpath: &Path, keypath: &Path) 
         }
     };
 
+    // @TODO: fix unwraps
+    let mut client = IotCoreClient::build(&autodetected_config, &keypath, &cn).await.unwrap();
+    client.connect().await.unwrap();
+
+    /*
     // build actors
     let iotcore_actor = match IotCoreActor::build(&cn.user().to_string(), &autodetected_config, &cacertpath, &certpath, &keypath) {
         Ok(actor) => actor,
@@ -69,4 +74,6 @@ pub async fn run_subcommand(cacertpath: &Path, certpath: &Path, keypath: &Path) 
     tokio::signal::ctrl_c().await.unwrap();
     warn!("Ctrl-C received, shutting down");
     System::current().stop();
+
+    */
 }

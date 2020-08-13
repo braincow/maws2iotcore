@@ -1,4 +1,325 @@
 use actix::prelude::*;
+use actix_mqtt_client::{QualityOfService, PublishMessage, ErrorMessage, MqttClient, MqttOptions};
+use tokio::io::split;
+use tokio::net::TcpStream;
+use native_tls::TlsConnector;
+use tokio::time::{delay_until, Instant};
+use std::{
+    str,
+    time::Duration,
+    path::Path
+};
+use serde::Deserialize;
+use addr::Email;
+use crate::lib::logger::LoggerActor;
+use crate::lib::autodetect::AutoDetectedConfig;
+use crate::lib::error::MawsToIotCoreError;
+use crate::lib::jwt::IotCoreAuthToken;
+
+// ------------------------- IoT Core CNC message types ------------------------- //
+
+#[derive(Debug, Deserialize)]
+pub struct IotCoreCommand {
+    command: String
+}
+
+impl IotCoreCommand {
+    fn from_json_string(json_string: &String) -> Result<IotCoreCommand, serde_json::Error> {
+        let command: IotCoreCommand = serde_json::from_str(&json_string)?;
+        Ok(command)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct IotCoreSerialConfig {
+    port: String
+}
+
+#[derive(Debug, Deserialize)]
+struct IotCoreTCPConfig {
+    host: String,
+    port: u64
+}
+
+#[derive(Debug, Deserialize)]
+struct IotCorePropertiesConfig {
+    relay_messages: Vec<String>
+}
+
+#[derive(Debug, Deserialize)]
+struct IotCoreLoggerConfig {
+    r#type: String,
+    serial: IotCoreSerialConfig,
+    tcp: IotCoreTCPConfig,
+    autostart: bool
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IotCoreConfig {
+    logger: IotCoreLoggerConfig,
+    iotcore: IotCorePropertiesConfig
+}
+
+#[derive(Debug)]
+pub enum IotCoreCNCMessageKind {
+    CONFIG(IotCoreConfig),
+    COMMAND(IotCoreCommand)
+}
+
+impl IotCoreCNCMessageKind {
+    pub fn parse_from_mqtt_message(message: &PublishMessage) -> Result<Option<IotCoreCNCMessageKind>, IotCoreCNCMessageError> {
+        let mut parsed = None;
+
+        let topic = match IotCoreTopicTypeKind::from_str(&message.topic_name) {
+            Ok(topic) => topic,
+            Err(error) => return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC config messages topic '{}': {}", message.topic_name, error)))
+        };
+
+        let payload_string = match str::from_utf8(&message.payload) {
+            Ok(payload) => payload.to_string(),
+            Err(error) => return Err(IotCoreCNCMessageError::new(&format!("Malformed payload UTF8 bytearray on CNC message: {}", error)))
+        };
+
+        match topic {
+            IotCoreTopicTypeKind::CONFIG => {
+                match IotCoreConfig::from_json_string(&payload_string) {
+                    Ok(msg) => parsed = Some(IotCoreCNCMessageKind::CONFIG(msg)),
+                    Err(error) => {
+                        return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC config message: {}", error)));
+                    }
+                };
+            },
+            IotCoreTopicTypeKind::COMMAND => {
+                match IotCoreCommand::from_json_string(&payload_string) {
+                    Ok(msg) => parsed = Some(IotCoreCNCMessageKind::COMMAND(msg)),
+                    Err(error) => {
+                        return Err(IotCoreCNCMessageError::new(&format!("Error while parsing CNC command message: {}", error)));
+                    }
+                };
+            },
+            IotCoreTopicTypeKind::EVENT => warn!("I'm not supposed to receive EVENT type messages through CNC channels! Disgarding message.")
+        };
+
+        Ok(parsed)
+    }
+}
+
+impl Message for IotCoreCNCMessageKind {
+    type Result = bool;
+}
+
+impl IotCoreConfig {
+    fn from_json_string(json_string: &String) -> Result<IotCoreConfig, serde_json::Error> {
+        let config: IotCoreConfig = serde_json::from_str(&json_string)?;
+        Ok(config)
+    }
+}
+
+type IotCoreCNCMessageError = MawsToIotCoreError;
+
+// ------------------------- IoT Core CNC message types end --------------------- //
+
+// ------------------------- IoT Core CNC topic types ------------------------- //
+
+type IotCoreTopicError = MawsToIotCoreError;
+
+pub enum IotCoreTopicTypeKind {
+    EVENT,
+    CONFIG,
+    COMMAND
+}
+
+impl IotCoreTopicTypeKind {
+    pub fn value(&self, sub_folder: Option<String>) -> String {
+        match *self {
+            IotCoreTopicTypeKind::EVENT => "events".to_string(),
+            IotCoreTopicTypeKind::CONFIG => "config".to_string(),
+            IotCoreTopicTypeKind::COMMAND => {
+                match sub_folder {
+                    None => "commands/#".to_string(),
+                    Some(folder) => format!("commands/{}", folder)
+                }
+            }
+        }
+    }
+
+    pub fn from_str(source_string: &String) -> Result<IotCoreTopicTypeKind, IotCoreTopicError> {
+        let string_parts = source_string.split("/").into_iter().map(|x| x.trim()).collect::<Vec<&str>>();
+
+        if string_parts.len() < 4 || string_parts.len() > 5 {
+            // expecting splitted string to be of length four or five
+            return Err(IotCoreTopicError::new(&format!("Unable to properly split the topic string '{}' since it has {} parts.", source_string, string_parts.len())))
+        }
+
+        let mut topic = string_parts[3].to_string();
+
+        let mut sub_folder = None;
+        if string_parts.len() == 5 {
+            sub_folder = Some(string_parts[4].to_string());
+        }
+
+        let mut topic_with_subfolder = topic.clone();
+        if sub_folder.is_some() {
+            topic_with_subfolder = format!("{}/{}", topic.clone(), sub_folder.clone().unwrap());
+        } else {
+            // @TODO: this is an ugly way to do this. fix later.
+            if topic == "commands" {
+                topic_with_subfolder = format!("{}/#", topic.clone());
+            }
+        }
+
+        if topic_with_subfolder != topic {
+            topic = topic_with_subfolder;
+        }
+
+        if IotCoreTopicTypeKind::EVENT.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::EVENT)
+        } else if IotCoreTopicTypeKind::CONFIG.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::CONFIG)
+        } else if IotCoreTopicTypeKind::COMMAND.value(sub_folder.clone()) == topic {
+            return Ok(IotCoreTopicTypeKind::COMMAND)
+        } else {
+            return Err(IotCoreTopicError::new(&format!("Unrecognized parsed topic '{}' in '{}'", string_parts[3], source_string)))
+        }
+    }
+}
+
+// ------------------------- IoT Core CNC topic types end --------------------- //
+
+// ------------------------- IoT Core client starts --------------------------- //
+
+pub struct UpdateLoggerActorAddressMessage {
+    pub logger_address: Addr<LoggerActor>
+}
+
+impl Message for UpdateLoggerActorAddressMessage {
+    type Result = bool;
+}
+
+pub struct ErrorActor;
+
+impl actix::Actor for ErrorActor {
+    type Context = Context<Self>;
+}
+
+impl actix::Handler<ErrorMessage> for ErrorActor {
+    type Result = ();
+
+    fn handle(&mut self, error: ErrorMessage, _: &mut Self::Context) -> Self::Result {
+        error!("Got an error: {}", error.0);
+    }
+}
+
+pub struct MessageActor;
+
+impl actix::Actor for MessageActor {
+    type Context = Context<Self>;
+}
+
+impl actix::Handler<PublishMessage> for MessageActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PublishMessage, _: &mut Self::Context,) -> Self::Result {
+        trace!(
+            "Got message: id:{}, topic: {}, payload: {:?}",
+            msg.id,
+            msg.topic_name,
+            msg.payload
+        );
+
+        // @TODO: fix unwrap
+        let cnc_message = IotCoreCNCMessageKind::parse_from_mqtt_message(&msg).unwrap();
+    }
+}
+
+type IotCoreClientError = MawsToIotCoreError;
+
+pub struct IotCoreClient {
+    client: MqttClient,
+    jwt_token_factory: IotCoreAuthToken,
+    device_id: String
+}
+
+impl IotCoreClient {
+
+    async fn subscribe(&mut self, topic: IotCoreTopicTypeKind, subfolder: Option<String>) -> Result<(), std::io::Error> {
+        let topic = format!("/devices/{}/{}", self.device_id, topic.value(subfolder));
+        self.client.subscribe(topic.clone(), QualityOfService::Level2).await?;
+
+        trace!("Subscribed to topic {}", topic.clone());
+        Ok(())
+    }
+
+    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
+        // initiate connect
+        self.client.connect().await?;
+
+        // Waiting for the client to be connected
+        while !self.client.is_connected().await? {
+            let delay_time = Instant::now() + Duration::new(1, 0);
+            delay_until(delay_time).await;
+        }
+        trace!("MQTT connected");
+
+        // subscribe to CNC channels
+        self.subscribe(IotCoreTopicTypeKind::CONFIG, None).await?;
+        self.subscribe(IotCoreTopicTypeKind::COMMAND, None).await?;
+
+        Ok(())
+    }
+
+    pub async fn build(autodetected_config: &AutoDetectedConfig, keypath: &Path, device_id: &Email) -> Result<IotCoreClient, IotCoreClientError> {
+        let jwt_token_factory = IotCoreAuthToken::build(&autodetected_config.registry_config.project, keypath);
+        let jwt_token = match jwt_token_factory.issue_new() {
+            Ok(jwt_token) => jwt_token,
+            Err(error) => return Err(IotCoreClientError::new(&format!("Error while issuing initial JWT token: {}", error)))
+        };
+
+        let stream = match TcpStream::connect(autodetected_config.mqtt_sockaddr).await {
+            Ok(stream) => stream,
+            Err(error) => return Err(IotCoreClientError::new(&format!("Error while connecting to '{}': {}", autodetected_config.mqtt_sockaddr, error)))
+        };
+
+        let inner_cx = match TlsConnector::builder()
+                .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+                .build() {
+            Ok(cx) => cx,
+            Err(error) => return Err(IotCoreClientError::new(&format!("Unable to build TLS context: {}", error)))
+        };
+        let outer_cx = tokio_native_tls::TlsConnector::from(inner_cx);
+        let stream = match outer_cx.connect(&autodetected_config.mqtt_hostname, stream).await  {
+            Ok(cx) => cx,
+            Err(error) => return Err(IotCoreClientError::new(&format!("Unable to establish TLS connection: {}", error)))
+        };
+
+        trace!("TLS stream connected to {}", autodetected_config.mqtt_sockaddr);
+        let (reader, writer) = split(stream);
+
+        let mut options = MqttOptions::default();
+        options.user_name = Some(device_id.user().to_string());
+        options.password = Some(jwt_token);
+
+        let client = MqttClient::new(
+            reader, writer,
+            device_id.user().to_string(),
+            options,
+            MessageActor.start().recipient(),
+            ErrorActor.start().recipient(),
+            None,
+        );
+
+        Ok(IotCoreClient{
+            client: client,
+            jwt_token_factory: jwt_token_factory,
+            device_id: device_id.user().to_string()
+        })
+    }
+}
+
+// ------------------------- IoT Core client ends --------------------------- //
+
+/*
+use actix::prelude::*;
 use std::path::Path;
 use paho_mqtt as mqtt;
 use serde::Deserialize;
@@ -395,3 +716,4 @@ impl IotCoreClient {
 }
 
 // eof
+*/
