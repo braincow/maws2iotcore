@@ -1,3 +1,4 @@
+use actix::prelude::*;
 use std::path::Path;
 use openssl::nid::Nid;
 use addr::Email;
@@ -38,6 +39,10 @@ pub async fn run_subcommand(cacertpath: &Path, certpath: &Path, keypath: &Path) 
     // @TODO: fix unwraps
     let mut client = IotCoreClient::build(&autodetected_config, &keypath, &cn).await.unwrap();
     client.connect().await.unwrap();
+
+    tokio::signal::ctrl_c().await.unwrap();
+    warn!("Ctrl-C received, shutting down");
+    System::current().stop();
 
     /*
     // build actors
