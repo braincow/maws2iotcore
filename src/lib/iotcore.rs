@@ -260,7 +260,7 @@ impl IotCoreClient {
             delay_until(delay_time).await;
         }
         trace!("MQTT connected");
-
+        
         // subscribe to CNC channels
         self.subscribe(IotCoreTopicTypeKind::CONFIG, None).await?;
         self.subscribe(IotCoreTopicTypeKind::COMMAND, None).await?;
@@ -275,7 +275,7 @@ impl IotCoreClient {
             Err(error) => return Err(IotCoreClientError::new(&format!("Error while issuing initial JWT token: {}", error)))
         };
 
-        let stream = match TcpStream::connect(autodetected_config.mqtt_sockaddr).await {
+        let tcp_stream = match TcpStream::connect(autodetected_config.mqtt_sockaddr).await {
             Ok(stream) => stream,
             Err(error) => return Err(IotCoreClientError::new(&format!("Error while connecting to '{}': {}", autodetected_config.mqtt_sockaddr, error)))
         };
@@ -287,13 +287,14 @@ impl IotCoreClient {
             Err(error) => return Err(IotCoreClientError::new(&format!("Unable to build TLS context: {}", error)))
         };
         let outer_cx = tokio_native_tls::TlsConnector::from(inner_cx);
-        let stream = match outer_cx.connect(&autodetected_config.mqtt_hostname, stream).await  {
-            Ok(cx) => cx,
+        let tls_stream = match outer_cx.connect(&autodetected_config.mqtt_hostname, tcp_stream).await  {
+            Ok(stream) => stream,
             Err(error) => return Err(IotCoreClientError::new(&format!("Unable to establish TLS connection: {}", error)))
         };
 
+        trace!("{:?}", tls_stream);
         trace!("TLS stream connected to {}", autodetected_config.mqtt_sockaddr);
-        let (reader, writer) = split(stream);
+        let (reader, writer) = split(tls_stream);
 
         let mut options = MqttOptions::default();
         options.user_name = Some(device_id.user().to_string());
