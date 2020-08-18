@@ -32,6 +32,6 @@ actix-rt = "1.1"
 addr = "0.2"
 actix-mqtt-client = "0.4"
 tokio-native-tls = "0.1"
-native-tls = { version = "0.2", features = ["vendored"] }
+native-tls = { version = "0.2" }
 
 # eof
