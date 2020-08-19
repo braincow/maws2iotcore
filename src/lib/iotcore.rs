@@ -297,12 +297,12 @@ impl IotCoreClient {
         let (reader, writer) = split(tls_stream);
 
         let mut options = MqttOptions::default();
-        options.user_name = Some(device_id.user().to_string());
+        options.user_name = Some("not_used".to_string());
         options.password = Some(jwt_token);
 
         let client = MqttClient::new(
             reader, writer,
-            device_id.user().to_string(),
+            autodetected_config.as_iotcore_client_id(&device_id.user().to_string()),
             options,
             MessageActor.start().recipient(),
             ErrorActor.start().recipient(),

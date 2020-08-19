@@ -30,6 +30,16 @@ pub struct AutoDetectedConfig {
 }
 
 impl AutoDetectedConfig {
+    pub fn as_iotcore_client_id(&self, device_id: &String) -> String {
+        let client_id = format!("projects/{}/locations/{}/registries/{}/devices/{}",
+            self.registry_config.project,
+            self.registry_config.region,
+            self.registry_config.name,
+            device_id);
+        
+        client_id
+    }
+
     pub fn build(domain: &str) -> Result<AutoDetectedConfig, AutoDetectedConfigError> {
         let config = match DnsConfig::load_default() {
             Ok(config) => config,
